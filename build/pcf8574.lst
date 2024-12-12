@@ -1,0 +1,439 @@
+ARM GAS  /tmp/ccyq6UYQ.s 			page 1
+
+
+   1              		.cpu cortex-m4
+   2              		.arch armv7e-m
+   3              		.fpu fpv4-sp-d16
+   4              		.eabi_attribute 27, 1
+   5              		.eabi_attribute 28, 1
+   6              		.eabi_attribute 20, 1
+   7              		.eabi_attribute 21, 1
+   8              		.eabi_attribute 23, 3
+   9              		.eabi_attribute 24, 1
+  10              		.eabi_attribute 25, 1
+  11              		.eabi_attribute 26, 1
+  12              		.eabi_attribute 30, 1
+  13              		.eabi_attribute 34, 1
+  14              		.eabi_attribute 18, 4
+  15              		.file	"pcf8574.c"
+  16              		.text
+  17              	.Ltext0:
+  18              		.cfi_sections	.debug_frame
+  19              		.file 1 "Core/Src/pcf8574.c"
+  20              		.section	.text.PCF8574_WritePort,"ax",%progbits
+  21              		.align	1
+  22              		.global	PCF8574_WritePort
+  23              		.syntax unified
+  24              		.thumb
+  25              		.thumb_func
+  27              	PCF8574_WritePort:
+  28              	.LVL0:
+  29              	.LFB224:
+   1:Core/Src/pcf8574.c **** /*
+   2:Core/Src/pcf8574.c ****  * pcf8574.c
+   3:Core/Src/pcf8574.c ****  *
+   4:Core/Src/pcf8574.c ****  *  Created on: Aug 26, 2024
+   5:Core/Src/pcf8574.c ****  *      Author: Alixahedi
+   6:Core/Src/pcf8574.c ****  */
+   7:Core/Src/pcf8574.c **** 
+   8:Core/Src/pcf8574.c **** #include "pcf8574.h"
+   9:Core/Src/pcf8574.c **** 
+  10:Core/Src/pcf8574.c **** 
+  11:Core/Src/pcf8574.c **** void PCF8574_Init(PCF8574_HandleTypeDef *pcf8574, I2C_HandleTypeDef *hi2c, uint8_t a0, uint8_t a1, 
+  12:Core/Src/pcf8574.c ****     pcf8574->hi2c = hi2c;
+  13:Core/Src/pcf8574.c ****     pcf8574->address = PCF8574_ADDRESS_BASE | (a0 << 1) | (a1 << 2) | (a2 << 3);
+  14:Core/Src/pcf8574.c ****     pcf8574->portState = 0x00;
+  15:Core/Src/pcf8574.c ****     PCF8574_WritePort(pcf8574, pcf8574->portState);
+  16:Core/Src/pcf8574.c **** }
+  17:Core/Src/pcf8574.c **** 
+  18:Core/Src/pcf8574.c **** 
+  19:Core/Src/pcf8574.c **** void PCF8574_WritePin(PCF8574_HandleTypeDef *pcf8574, uint8_t pin, GPIO_PinState state) {
+  20:Core/Src/pcf8574.c ****     if (state == GPIO_PIN_RESET) {
+  21:Core/Src/pcf8574.c ****         pcf8574->portState &= ~(1 << pin);
+  22:Core/Src/pcf8574.c ****     } else {
+  23:Core/Src/pcf8574.c ****         pcf8574->portState |= (1 << pin);
+  24:Core/Src/pcf8574.c ****     }
+  25:Core/Src/pcf8574.c ****     PCF8574_WritePort(pcf8574, pcf8574->portState);
+  26:Core/Src/pcf8574.c **** }
+  27:Core/Src/pcf8574.c **** 
+  28:Core/Src/pcf8574.c **** 
+  29:Core/Src/pcf8574.c **** GPIO_PinState PCF8574_ReadPin(PCF8574_HandleTypeDef *pcf8574, uint8_t pin) {
+ARM GAS  /tmp/ccyq6UYQ.s 			page 2
+
+
+  30:Core/Src/pcf8574.c ****     PCF8574_ReadPort(pcf8574);
+  31:Core/Src/pcf8574.c ****     return (pcf8574->portState & (1 << pin)) ? GPIO_PIN_SET : GPIO_PIN_RESET;
+  32:Core/Src/pcf8574.c **** }
+  33:Core/Src/pcf8574.c **** 
+  34:Core/Src/pcf8574.c **** 
+  35:Core/Src/pcf8574.c **** void PCF8574_TogglePin(PCF8574_HandleTypeDef *pcf8574, uint8_t pin) {
+  36:Core/Src/pcf8574.c ****     pcf8574->portState ^= (1 << pin);
+  37:Core/Src/pcf8574.c ****     PCF8574_WritePort(pcf8574, pcf8574->portState);
+  38:Core/Src/pcf8574.c **** }
+  39:Core/Src/pcf8574.c **** 
+  40:Core/Src/pcf8574.c **** // نوشتن وضعیت کلی پورت به PCF8574
+  41:Core/Src/pcf8574.c **** void PCF8574_WritePort(PCF8574_HandleTypeDef *pcf8574, uint8_t value) {
+  30              		.loc 1 41 71 view -0
+  31              		.cfi_startproc
+  32              		@ args = 0, pretend = 0, frame = 0
+  33              		@ frame_needed = 0, uses_anonymous_args = 0
+  34              		.loc 1 41 71 is_stmt 0 view .LVU1
+  35 0000 00B5     		push	{lr}
+  36              		.cfi_def_cfa_offset 4
+  37              		.cfi_offset 14, -4
+  38 0002 83B0     		sub	sp, sp, #12
+  39              		.cfi_def_cfa_offset 16
+  40 0004 8446     		mov	ip, r0
+  42:Core/Src/pcf8574.c **** 	pcf8574->portState = value;
+  41              		.loc 1 42 2 is_stmt 1 view .LVU2
+  42              		.loc 1 42 21 is_stmt 0 view .LVU3
+  43 0006 4171     		strb	r1, [r0, #5]
+  43:Core/Src/pcf8574.c ****     HAL_I2C_Master_Transmit(pcf8574->hi2c, pcf8574->address, &(pcf8574->portState), 1, HAL_MAX_DELA
+  44              		.loc 1 43 5 is_stmt 1 view .LVU4
+  45 0008 0246     		mov	r2, r0
+  46 000a 52F8050B 		ldr	r0, [r2], #5
+  47              	.LVL1:
+  48              		.loc 1 43 5 is_stmt 0 view .LVU5
+  49 000e 4FF0FF33 		mov	r3, #-1
+  50 0012 0093     		str	r3, [sp]
+  51 0014 0123     		movs	r3, #1
+  52 0016 9CF80410 		ldrb	r1, [ip, #4]	@ zero_extendqisi2
+  53              	.LVL2:
+  54              		.loc 1 43 5 view .LVU6
+  55 001a FFF7FEFF 		bl	HAL_I2C_Master_Transmit
+  56              	.LVL3:
+  44:Core/Src/pcf8574.c **** }
+  57              		.loc 1 44 1 view .LVU7
+  58 001e 03B0     		add	sp, sp, #12
+  59              		.cfi_def_cfa_offset 4
+  60              		@ sp needed
+  61 0020 5DF804FB 		ldr	pc, [sp], #4
+  62              		.cfi_endproc
+  63              	.LFE224:
+  65              		.section	.text.PCF8574_Init,"ax",%progbits
+  66              		.align	1
+  67              		.global	PCF8574_Init
+  68              		.syntax unified
+  69              		.thumb
+  70              		.thumb_func
+  72              	PCF8574_Init:
+  73              	.LVL4:
+ARM GAS  /tmp/ccyq6UYQ.s 			page 3
+
+
+  74              	.LFB220:
+  11:Core/Src/pcf8574.c ****     pcf8574->hi2c = hi2c;
+  75              		.loc 1 11 112 is_stmt 1 view -0
+  76              		.cfi_startproc
+  77              		@ args = 4, pretend = 0, frame = 0
+  78              		@ frame_needed = 0, uses_anonymous_args = 0
+  11:Core/Src/pcf8574.c ****     pcf8574->hi2c = hi2c;
+  79              		.loc 1 11 112 is_stmt 0 view .LVU9
+  80 0000 08B5     		push	{r3, lr}
+  81              		.cfi_def_cfa_offset 8
+  82              		.cfi_offset 3, -8
+  83              		.cfi_offset 14, -4
+  12:Core/Src/pcf8574.c ****     pcf8574->address = PCF8574_ADDRESS_BASE | (a0 << 1) | (a1 << 2) | (a2 << 3);
+  84              		.loc 1 12 5 is_stmt 1 view .LVU10
+  12:Core/Src/pcf8574.c ****     pcf8574->address = PCF8574_ADDRESS_BASE | (a0 << 1) | (a1 << 2) | (a2 << 3);
+  85              		.loc 1 12 19 is_stmt 0 view .LVU11
+  86 0002 0160     		str	r1, [r0]
+  13:Core/Src/pcf8574.c ****     pcf8574->portState = 0x00;
+  87              		.loc 1 13 5 is_stmt 1 view .LVU12
+  13:Core/Src/pcf8574.c ****     pcf8574->portState = 0x00;
+  88              		.loc 1 13 45 is_stmt 0 view .LVU13
+  89 0004 5200     		lsls	r2, r2, #1
+  90              	.LVL5:
+  13:Core/Src/pcf8574.c ****     pcf8574->portState = 0x00;
+  91              		.loc 1 13 45 view .LVU14
+  92 0006 42F04002 		orr	r2, r2, #64
+  93 000a 52B2     		sxtb	r2, r2
+  13:Core/Src/pcf8574.c ****     pcf8574->portState = 0x00;
+  94              		.loc 1 13 57 view .LVU15
+  95 000c 42EA8302 		orr	r2, r2, r3, lsl #2
+  96 0010 52B2     		sxtb	r2, r2
+  13:Core/Src/pcf8574.c ****     pcf8574->portState = 0x00;
+  97              		.loc 1 13 69 view .LVU16
+  98 0012 9DF80830 		ldrb	r3, [sp, #8]	@ zero_extendqisi2
+  99              	.LVL6:
+  13:Core/Src/pcf8574.c ****     pcf8574->portState = 0x00;
+ 100              		.loc 1 13 69 view .LVU17
+ 101 0016 42EAC302 		orr	r2, r2, r3, lsl #3
+  13:Core/Src/pcf8574.c ****     pcf8574->portState = 0x00;
+ 102              		.loc 1 13 22 view .LVU18
+ 103 001a 0271     		strb	r2, [r0, #4]
+  14:Core/Src/pcf8574.c ****     PCF8574_WritePort(pcf8574, pcf8574->portState);
+ 104              		.loc 1 14 5 is_stmt 1 view .LVU19
+  14:Core/Src/pcf8574.c ****     PCF8574_WritePort(pcf8574, pcf8574->portState);
+ 105              		.loc 1 14 24 is_stmt 0 view .LVU20
+ 106 001c 0021     		movs	r1, #0
+ 107              	.LVL7:
+  14:Core/Src/pcf8574.c ****     PCF8574_WritePort(pcf8574, pcf8574->portState);
+ 108              		.loc 1 14 24 view .LVU21
+ 109 001e 4171     		strb	r1, [r0, #5]
+  15:Core/Src/pcf8574.c **** }
+ 110              		.loc 1 15 5 is_stmt 1 view .LVU22
+ 111 0020 FFF7FEFF 		bl	PCF8574_WritePort
+ 112              	.LVL8:
+  16:Core/Src/pcf8574.c **** 
+ 113              		.loc 1 16 1 is_stmt 0 view .LVU23
+ 114 0024 08BD     		pop	{r3, pc}
+ARM GAS  /tmp/ccyq6UYQ.s 			page 4
+
+
+  16:Core/Src/pcf8574.c **** 
+ 115              		.loc 1 16 1 view .LVU24
+ 116              		.cfi_endproc
+ 117              	.LFE220:
+ 119              		.section	.text.PCF8574_WritePin,"ax",%progbits
+ 120              		.align	1
+ 121              		.global	PCF8574_WritePin
+ 122              		.syntax unified
+ 123              		.thumb
+ 124              		.thumb_func
+ 126              	PCF8574_WritePin:
+ 127              	.LVL9:
+ 128              	.LFB221:
+  19:Core/Src/pcf8574.c ****     if (state == GPIO_PIN_RESET) {
+ 129              		.loc 1 19 89 is_stmt 1 view -0
+ 130              		.cfi_startproc
+ 131              		@ args = 0, pretend = 0, frame = 0
+ 132              		@ frame_needed = 0, uses_anonymous_args = 0
+  19:Core/Src/pcf8574.c ****     if (state == GPIO_PIN_RESET) {
+ 133              		.loc 1 19 89 is_stmt 0 view .LVU26
+ 134 0000 08B5     		push	{r3, lr}
+ 135              		.cfi_def_cfa_offset 8
+ 136              		.cfi_offset 3, -8
+ 137              		.cfi_offset 14, -4
+  20:Core/Src/pcf8574.c ****         pcf8574->portState &= ~(1 << pin);
+ 138              		.loc 1 20 5 is_stmt 1 view .LVU27
+  20:Core/Src/pcf8574.c ****         pcf8574->portState &= ~(1 << pin);
+ 139              		.loc 1 20 8 is_stmt 0 view .LVU28
+ 140 0002 52B9     		cbnz	r2, .L6
+  21:Core/Src/pcf8574.c ****     } else {
+ 141              		.loc 1 21 9 is_stmt 1 view .LVU29
+  21:Core/Src/pcf8574.c ****     } else {
+ 142              		.loc 1 21 16 is_stmt 0 view .LVU30
+ 143 0004 4279     		ldrb	r2, [r0, #5]	@ zero_extendqisi2
+ 144              	.LVL10:
+  21:Core/Src/pcf8574.c ****     } else {
+ 145              		.loc 1 21 35 view .LVU31
+ 146 0006 0123     		movs	r3, #1
+ 147 0008 8B40     		lsls	r3, r3, r1
+  21:Core/Src/pcf8574.c ****     } else {
+ 148              		.loc 1 21 28 view .LVU32
+ 149 000a DB43     		mvns	r3, r3
+ 150 000c 5BB2     		sxtb	r3, r3
+ 151 000e 1340     		ands	r3, r3, r2
+ 152 0010 4371     		strb	r3, [r0, #5]
+ 153              	.L7:
+  25:Core/Src/pcf8574.c **** }
+ 154              		.loc 1 25 5 is_stmt 1 view .LVU33
+ 155 0012 4179     		ldrb	r1, [r0, #5]	@ zero_extendqisi2
+ 156              	.LVL11:
+  25:Core/Src/pcf8574.c **** }
+ 157              		.loc 1 25 5 is_stmt 0 view .LVU34
+ 158 0014 FFF7FEFF 		bl	PCF8574_WritePort
+ 159              	.LVL12:
+  26:Core/Src/pcf8574.c **** 
+ 160              		.loc 1 26 1 view .LVU35
+ 161 0018 08BD     		pop	{r3, pc}
+ARM GAS  /tmp/ccyq6UYQ.s 			page 5
+
+
+ 162              	.LVL13:
+ 163              	.L6:
+  23:Core/Src/pcf8574.c ****     }
+ 164              		.loc 1 23 9 is_stmt 1 view .LVU36
+  23:Core/Src/pcf8574.c ****     }
+ 165              		.loc 1 23 16 is_stmt 0 view .LVU37
+ 166 001a 4379     		ldrb	r3, [r0, #5]	@ zero_extendqisi2
+  23:Core/Src/pcf8574.c ****     }
+ 167              		.loc 1 23 34 view .LVU38
+ 168 001c 0122     		movs	r2, #1
+ 169              	.LVL14:
+  23:Core/Src/pcf8574.c ****     }
+ 170              		.loc 1 23 34 view .LVU39
+ 171 001e 8A40     		lsls	r2, r2, r1
+  23:Core/Src/pcf8574.c ****     }
+ 172              		.loc 1 23 28 view .LVU40
+ 173 0020 1343     		orrs	r3, r3, r2
+ 174 0022 4371     		strb	r3, [r0, #5]
+ 175 0024 F5E7     		b	.L7
+ 176              		.cfi_endproc
+ 177              	.LFE221:
+ 179              		.section	.text.PCF8574_TogglePin,"ax",%progbits
+ 180              		.align	1
+ 181              		.global	PCF8574_TogglePin
+ 182              		.syntax unified
+ 183              		.thumb
+ 184              		.thumb_func
+ 186              	PCF8574_TogglePin:
+ 187              	.LVL15:
+ 188              	.LFB223:
+  35:Core/Src/pcf8574.c ****     pcf8574->portState ^= (1 << pin);
+ 189              		.loc 1 35 69 is_stmt 1 view -0
+ 190              		.cfi_startproc
+ 191              		@ args = 0, pretend = 0, frame = 0
+ 192              		@ frame_needed = 0, uses_anonymous_args = 0
+  35:Core/Src/pcf8574.c ****     pcf8574->portState ^= (1 << pin);
+ 193              		.loc 1 35 69 is_stmt 0 view .LVU42
+ 194 0000 08B5     		push	{r3, lr}
+ 195              		.cfi_def_cfa_offset 8
+ 196              		.cfi_offset 3, -8
+ 197              		.cfi_offset 14, -4
+  36:Core/Src/pcf8574.c ****     PCF8574_WritePort(pcf8574, pcf8574->portState);
+ 198              		.loc 1 36 5 is_stmt 1 view .LVU43
+  36:Core/Src/pcf8574.c ****     PCF8574_WritePort(pcf8574, pcf8574->portState);
+ 199              		.loc 1 36 12 is_stmt 0 view .LVU44
+ 200 0002 4379     		ldrb	r3, [r0, #5]	@ zero_extendqisi2
+  36:Core/Src/pcf8574.c ****     PCF8574_WritePort(pcf8574, pcf8574->portState);
+ 201              		.loc 1 36 30 view .LVU45
+ 202 0004 4FF0010C 		mov	ip, #1
+ 203 0008 0CFA01FC 		lsl	ip, ip, r1
+  36:Core/Src/pcf8574.c ****     PCF8574_WritePort(pcf8574, pcf8574->portState);
+ 204              		.loc 1 36 24 view .LVU46
+ 205 000c 83EA0C01 		eor	r1, r3, ip
+ 206              	.LVL16:
+  36:Core/Src/pcf8574.c ****     PCF8574_WritePort(pcf8574, pcf8574->portState);
+ 207              		.loc 1 36 24 view .LVU47
+ 208 0010 C9B2     		uxtb	r1, r1
+ARM GAS  /tmp/ccyq6UYQ.s 			page 6
+
+
+ 209 0012 4171     		strb	r1, [r0, #5]
+  37:Core/Src/pcf8574.c **** }
+ 210              		.loc 1 37 5 is_stmt 1 view .LVU48
+ 211 0014 FFF7FEFF 		bl	PCF8574_WritePort
+ 212              	.LVL17:
+  38:Core/Src/pcf8574.c **** 
+ 213              		.loc 1 38 1 is_stmt 0 view .LVU49
+ 214 0018 08BD     		pop	{r3, pc}
+ 215              		.cfi_endproc
+ 216              	.LFE223:
+ 218              		.section	.text.PCF8574_ReadPort,"ax",%progbits
+ 219              		.align	1
+ 220              		.global	PCF8574_ReadPort
+ 221              		.syntax unified
+ 222              		.thumb
+ 223              		.thumb_func
+ 225              	PCF8574_ReadPort:
+ 226              	.LVL18:
+ 227              	.LFB225:
+  45:Core/Src/pcf8574.c **** 
+  46:Core/Src/pcf8574.c **** // خواندن وضعیت کلی پورت از PCF8574
+  47:Core/Src/pcf8574.c **** uint8_t PCF8574_ReadPort(PCF8574_HandleTypeDef *pcf8574) {
+ 228              		.loc 1 47 58 is_stmt 1 view -0
+ 229              		.cfi_startproc
+ 230              		@ args = 0, pretend = 0, frame = 0
+ 231              		@ frame_needed = 0, uses_anonymous_args = 0
+ 232              		.loc 1 47 58 is_stmt 0 view .LVU51
+ 233 0000 10B5     		push	{r4, lr}
+ 234              		.cfi_def_cfa_offset 8
+ 235              		.cfi_offset 4, -8
+ 236              		.cfi_offset 14, -4
+ 237 0002 82B0     		sub	sp, sp, #8
+ 238              		.cfi_def_cfa_offset 16
+ 239 0004 0446     		mov	r4, r0
+  48:Core/Src/pcf8574.c ****     HAL_I2C_Master_Receive(pcf8574->hi2c, pcf8574->address, &(pcf8574->portState), 1, HAL_MAX_DELAY
+ 240              		.loc 1 48 5 is_stmt 1 view .LVU52
+ 241 0006 0246     		mov	r2, r0
+ 242 0008 52F8050B 		ldr	r0, [r2], #5
+ 243              	.LVL19:
+ 244              		.loc 1 48 5 is_stmt 0 view .LVU53
+ 245 000c 4FF0FF33 		mov	r3, #-1
+ 246 0010 0093     		str	r3, [sp]
+ 247 0012 0123     		movs	r3, #1
+ 248 0014 2179     		ldrb	r1, [r4, #4]	@ zero_extendqisi2
+ 249 0016 FFF7FEFF 		bl	HAL_I2C_Master_Receive
+ 250              	.LVL20:
+  49:Core/Src/pcf8574.c ****     return pcf8574->portState;
+ 251              		.loc 1 49 5 is_stmt 1 view .LVU54
+  50:Core/Src/pcf8574.c **** }
+ 252              		.loc 1 50 1 is_stmt 0 view .LVU55
+ 253 001a 6079     		ldrb	r0, [r4, #5]	@ zero_extendqisi2
+ 254 001c 02B0     		add	sp, sp, #8
+ 255              		.cfi_def_cfa_offset 8
+ 256              		@ sp needed
+ 257 001e 10BD     		pop	{r4, pc}
+ 258              		.loc 1 50 1 view .LVU56
+ 259              		.cfi_endproc
+ARM GAS  /tmp/ccyq6UYQ.s 			page 7
+
+
+ 260              	.LFE225:
+ 262              		.section	.text.PCF8574_ReadPin,"ax",%progbits
+ 263              		.align	1
+ 264              		.global	PCF8574_ReadPin
+ 265              		.syntax unified
+ 266              		.thumb
+ 267              		.thumb_func
+ 269              	PCF8574_ReadPin:
+ 270              	.LVL21:
+ 271              	.LFB222:
+  29:Core/Src/pcf8574.c ****     PCF8574_ReadPort(pcf8574);
+ 272              		.loc 1 29 76 is_stmt 1 view -0
+ 273              		.cfi_startproc
+ 274              		@ args = 0, pretend = 0, frame = 0
+ 275              		@ frame_needed = 0, uses_anonymous_args = 0
+  29:Core/Src/pcf8574.c ****     PCF8574_ReadPort(pcf8574);
+ 276              		.loc 1 29 76 is_stmt 0 view .LVU58
+ 277 0000 38B5     		push	{r3, r4, r5, lr}
+ 278              		.cfi_def_cfa_offset 16
+ 279              		.cfi_offset 3, -16
+ 280              		.cfi_offset 4, -12
+ 281              		.cfi_offset 5, -8
+ 282              		.cfi_offset 14, -4
+ 283 0002 0546     		mov	r5, r0
+ 284 0004 0C46     		mov	r4, r1
+  30:Core/Src/pcf8574.c ****     return (pcf8574->portState & (1 << pin)) ? GPIO_PIN_SET : GPIO_PIN_RESET;
+ 285              		.loc 1 30 5 is_stmt 1 view .LVU59
+ 286 0006 FFF7FEFF 		bl	PCF8574_ReadPort
+ 287              	.LVL22:
+  31:Core/Src/pcf8574.c **** }
+ 288              		.loc 1 31 5 view .LVU60
+  31:Core/Src/pcf8574.c **** }
+ 289              		.loc 1 31 20 is_stmt 0 view .LVU61
+ 290 000a 6879     		ldrb	r0, [r5, #5]	@ zero_extendqisi2
+  31:Core/Src/pcf8574.c **** }
+ 291              		.loc 1 31 46 view .LVU62
+ 292 000c 2041     		asrs	r0, r0, r4
+  32:Core/Src/pcf8574.c **** 
+ 293              		.loc 1 32 1 view .LVU63
+ 294 000e 00F00100 		and	r0, r0, #1
+ 295 0012 38BD     		pop	{r3, r4, r5, pc}
+  32:Core/Src/pcf8574.c **** 
+ 296              		.loc 1 32 1 view .LVU64
+ 297              		.cfi_endproc
+ 298              	.LFE222:
+ 300              		.text
+ 301              	.Letext0:
+ 302              		.file 2 "/usr/arm-none-eabi/include/machine/_default_types.h"
+ 303              		.file 3 "/usr/arm-none-eabi/include/sys/_stdint.h"
+ 304              		.file 4 "Drivers/CMSIS/Device/ST/STM32F4xx/Include/stm32f401xc.h"
+ 305              		.file 5 "Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_def.h"
+ 306              		.file 6 "Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_gpio.h"
+ 307              		.file 7 "Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_dma.h"
+ 308              		.file 8 "Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_i2c.h"
+ 309              		.file 9 "Core/Inc/pcf8574.h"
+ARM GAS  /tmp/ccyq6UYQ.s 			page 8
+
+
+DEFINED SYMBOLS
+                            *ABS*:00000000 pcf8574.c
+     /tmp/ccyq6UYQ.s:21     .text.PCF8574_WritePort:00000000 $t
+     /tmp/ccyq6UYQ.s:27     .text.PCF8574_WritePort:00000000 PCF8574_WritePort
+     /tmp/ccyq6UYQ.s:66     .text.PCF8574_Init:00000000 $t
+     /tmp/ccyq6UYQ.s:72     .text.PCF8574_Init:00000000 PCF8574_Init
+     /tmp/ccyq6UYQ.s:120    .text.PCF8574_WritePin:00000000 $t
+     /tmp/ccyq6UYQ.s:126    .text.PCF8574_WritePin:00000000 PCF8574_WritePin
+     /tmp/ccyq6UYQ.s:180    .text.PCF8574_TogglePin:00000000 $t
+     /tmp/ccyq6UYQ.s:186    .text.PCF8574_TogglePin:00000000 PCF8574_TogglePin
+     /tmp/ccyq6UYQ.s:219    .text.PCF8574_ReadPort:00000000 $t
+     /tmp/ccyq6UYQ.s:225    .text.PCF8574_ReadPort:00000000 PCF8574_ReadPort
+     /tmp/ccyq6UYQ.s:263    .text.PCF8574_ReadPin:00000000 $t
+     /tmp/ccyq6UYQ.s:269    .text.PCF8574_ReadPin:00000000 PCF8574_ReadPin
+
+UNDEFINED SYMBOLS
+HAL_I2C_Master_Transmit
+HAL_I2C_Master_Receive

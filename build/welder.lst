@@ -1,0 +1,4056 @@
+ARM GAS  /tmp/ccd93dhD.s 			page 1
+
+
+   1              		.cpu cortex-m4
+   2              		.arch armv7e-m
+   3              		.fpu fpv4-sp-d16
+   4              		.eabi_attribute 27, 1
+   5              		.eabi_attribute 28, 1
+   6              		.eabi_attribute 20, 1
+   7              		.eabi_attribute 21, 1
+   8              		.eabi_attribute 23, 3
+   9              		.eabi_attribute 24, 1
+  10              		.eabi_attribute 25, 1
+  11              		.eabi_attribute 26, 1
+  12              		.eabi_attribute 30, 1
+  13              		.eabi_attribute 34, 1
+  14              		.eabi_attribute 18, 4
+  15              		.file	"welder.c"
+  16              		.text
+  17              	.Ltext0:
+  18              		.cfi_sections	.debug_frame
+  19              		.file 1 "Core/Src/welder.c"
+  20              		.section	.rodata.idle_menu.str1.4,"aMS",%progbits,1
+  21              		.align	2
+  22              	.LC0:
+  23 0000 25642E25 		.ascii	"%d.%dS\000"
+  23      645300
+  24 0007 00       		.align	2
+  25              	.LC1:
+  26 0008 50726566 		.ascii	"Preflow\000"
+  26      6C6F7700 
+  27              		.align	2
+  28              	.LC2:
+  29 0010 5570736C 		.ascii	"Upslope\000"
+  29      6F706500 
+  30              		.align	2
+  31              	.LC3:
+  32 0018 25646D53 		.ascii	"%dmS\000"
+  32      00
+  33 001d 000000   		.align	2
+  34              	.LC4:
+  35 0020 25645400 		.ascii	"%dT\000"
+  36              		.align	2
+  37              	.LC5:
+  38 0024 256400   		.ascii	"%d\000"
+  39              		.section	.text.idle_menu,"ax",%progbits
+  40              		.align	1
+  41              		.global	idle_menu
+  42              		.syntax unified
+  43              		.thumb
+  44              		.thumb_func
+  46              	idle_menu:
+  47              	.LFB224:
+   1:Core/Src/welder.c **** 
+   2:Core/Src/welder.c **** #include "welder.h"
+   3:Core/Src/welder.c **** #include "pcf8574.h"
+   4:Core/Src/welder.c **** #include "ssd1306.h"
+   5:Core/Src/welder.c **** #include "ssd1306_fonts.h"
+   6:Core/Src/welder.c **** #include "stdio.h"
+   7:Core/Src/welder.c **** #include "main.h"
+ARM GAS  /tmp/ccd93dhD.s 			page 2
+
+
+   8:Core/Src/welder.c **** 
+   9:Core/Src/welder.c **** // #define DEBUG
+  10:Core/Src/welder.c **** 
+  11:Core/Src/welder.c **** // DC welding params given in A
+  12:Core/Src/welder.c **** uint8_t base_current, background_current, crater_current, start_current;
+  13:Core/Src/welder.c **** 
+  14:Core/Src/welder.c **** // AC welding params given in Hz and Duty % respectfully
+  15:Core/Src/welder.c **** uint8_t ac_frequency, ac_duty;  // Goes from 0 = H to 100 = 99%; 0 = DC; Duty behaves as duty
+  16:Core/Src/welder.c **** 
+  17:Core/Src/welder.c **** // Pulse settings given in Hz and Duty % respectfully
+  18:Core/Src/welder.c **** float pulse_frequency;
+  19:Core/Src/welder.c **** uint8_t pulse_duty;
+  20:Core/Src/welder.c **** 
+  21:Core/Src/welder.c **** // Slope settings given in mS
+  22:Core/Src/welder.c **** uint16_t upslope_time, downslope_time;
+  23:Core/Src/welder.c **** 
+  24:Core/Src/welder.c **** // Gas settings given in mS
+  25:Core/Src/welder.c **** uint16_t preflow_time, postflow_time;
+  26:Core/Src/welder.c **** 
+  27:Core/Src/welder.c **** const char *menu_string[2] = {"Preflow", "Upslope"};
+  28:Core/Src/welder.c **** const char *mode_string[3] = {"DC", "AC", "Pul"};
+  29:Core/Src/welder.c **** const uint16_t current_threshold = 300; // Threshold at which we can tell that the arc is establish
+  30:Core/Src/welder.c **** const uint16_t ignition_timeout = 500;  // Time after which the arc should be going
+  31:Core/Src/welder.c **** const uint8_t max_current = 200;        // Amps
+  32:Core/Src/welder.c **** // const uint16_t debounce_time = 2;      // mS
+  33:Core/Src/welder.c **** const uint16_t ignition_current = 5;    // Amps
+  34:Core/Src/welder.c **** const uint16_t crater_time = 100;       // mS
+  35:Core/Src/welder.c **** 
+  36:Core/Src/welder.c **** uint8_t torch_trigger = 0;
+  37:Core/Src/welder.c **** uint8_t encoder_button = 0;
+  38:Core/Src/welder.c **** uint8_t pedal_connected = 0;
+  39:Core/Src/welder.c **** uint32_t adc_buffer[2];         // ADC CH0 - pedal, ADC CH1 - current sense
+  40:Core/Src/welder.c **** uint32_t start_tick = 0;
+  41:Core/Src/welder.c **** uint32_t deb_current_millis = 0;
+  42:Core/Src/welder.c **** uint32_t deb_prev_millis = 0;
+  43:Core/Src/welder.c **** 
+  44:Core/Src/welder.c **** 
+  45:Core/Src/welder.c **** 
+  46:Core/Src/welder.c **** enum State{
+  47:Core/Src/welder.c ****     idle,
+  48:Core/Src/welder.c ****     preflow,
+  49:Core/Src/welder.c ****     ignition,
+  50:Core/Src/welder.c ****     upslope,
+  51:Core/Src/welder.c ****     welding,
+  52:Core/Src/welder.c ****     downslope,
+  53:Core/Src/welder.c ****     crater,
+  54:Core/Src/welder.c ****     postflow
+  55:Core/Src/welder.c **** };
+  56:Core/Src/welder.c **** 
+  57:Core/Src/welder.c **** enum TriggerType
+  58:Core/Src/welder.c **** {
+  59:Core/Src/welder.c ****     _2T = 2,
+  60:Core/Src/welder.c ****     _4T = 4
+  61:Core/Src/welder.c **** };
+  62:Core/Src/welder.c **** 
+  63:Core/Src/welder.c **** enum WeldingMode
+  64:Core/Src/welder.c **** {
+ARM GAS  /tmp/ccd93dhD.s 			page 3
+
+
+  65:Core/Src/welder.c ****     DC = 1 << 0,
+  66:Core/Src/welder.c ****     AC = 1 << 1,
+  67:Core/Src/welder.c ****     Pulse = 1 << 2
+  68:Core/Src/welder.c **** };
+  69:Core/Src/welder.c **** 
+  70:Core/Src/welder.c **** enum TriggerType trigger_type = _4T; // 2T as default cus why not
+  71:Core/Src/welder.c **** enum WeldingMode welding_mode = 0;  // DC as default
+  72:Core/Src/welder.c **** volatile enum State state = idle;
+  73:Core/Src/welder.c **** 
+  74:Core/Src/welder.c **** PCF8574_HandleTypeDef pcf8574_1;
+  75:Core/Src/welder.c **** PCF8574_HandleTypeDef pcf8574_2;
+  76:Core/Src/welder.c **** 
+  77:Core/Src/welder.c **** 
+  78:Core/Src/welder.c **** // void welder(TIM_HandleTypeDef *enc_tim, TIM_HandleTypeDef *h_pwm_tim, TIM_HandleTypeDef *pwm_tim
+  79:Core/Src/welder.c ****             // I2C_HandleTypeDef *i2c, SPI_HandleTypeDef *spi, ADC_HandleTypeDef *adc)
+  80:Core/Src/welder.c **** void welder()
+  81:Core/Src/welder.c **** {
+  82:Core/Src/welder.c ****     preflow_time = 1200;
+  83:Core/Src/welder.c ****     postflow_time = 2000;
+  84:Core/Src/welder.c ****     upslope_time = 3000;
+  85:Core/Src/welder.c ****     downslope_time = 3000;
+  86:Core/Src/welder.c ****     start_current = 5;
+  87:Core/Src/welder.c ****     base_current = 200;
+  88:Core/Src/welder.c ****     background_current = 120;
+  89:Core/Src/welder.c ****     crater_current = 5;
+  90:Core/Src/welder.c ****     pedal_connected = 1;
+  91:Core/Src/welder.c **** 
+  92:Core/Src/welder.c ****     welding_mode |= Pulse;
+  93:Core/Src/welder.c ****     welding_mode |= AC;
+  94:Core/Src/welder.c ****     // welding_mode |= DC;
+  95:Core/Src/welder.c ****     pulse_duty = 20;
+  96:Core/Src/welder.c ****     pulse_frequency = 3;
+  97:Core/Src/welder.c **** 
+  98:Core/Src/welder.c ****     ac_frequency = 100;
+  99:Core/Src/welder.c ****     ac_duty = 70;
+ 100:Core/Src/welder.c **** 
+ 101:Core/Src/welder.c ****     // Init
+ 102:Core/Src/welder.c ****     HAL_GPIO_WritePin(GAS_GPIO_Port,GAS_Pin, GPIO_PIN_SET);
+ 103:Core/Src/welder.c ****     // Initialize the PCF8574 with the desired address (A0 = 0, A1 = 0, A2 = 0)
+ 104:Core/Src/welder.c ****     PCF8574_Init(&pcf8574_1, &hi2c1, 0, 0, 0);
+ 105:Core/Src/welder.c ****     PCF8574_Init(&pcf8574_2, &hi2c1, 0, 0, 1);
+ 106:Core/Src/welder.c **** 
+ 107:Core/Src/welder.c ****     PCF8574_WritePort(&pcf8574_1, 0x00);
+ 108:Core/Src/welder.c ****     PCF8574_WritePort(&pcf8574_2, 0x00);
+ 109:Core/Src/welder.c **** 
+ 110:Core/Src/welder.c ****     ssd1306_Init();
+ 111:Core/Src/welder.c ****     ssd1306_Fill(0);
+ 112:Core/Src/welder.c ****     ssd1306_UpdateScreen();
+ 113:Core/Src/welder.c **** 
+ 114:Core/Src/welder.c ****     HAL_TIM_Encoder_Start(&htim2, TIM_CHANNEL_ALL); // Encoder timer
+ 115:Core/Src/welder.c **** 
+ 116:Core/Src/welder.c ****     HAL_ADC_Start_DMA(&hadc1, adc_buffer, 2);
+ 117:Core/Src/welder.c **** 
+ 118:Core/Src/welder.c **** 
+ 119:Core/Src/welder.c ****     set_pwm_frequency(ac_frequency);
+ 120:Core/Src/welder.c ****     HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_4);
+ 121:Core/Src/welder.c ****     // HAL_TIM_PWM_Start_IT(pwm_tim, TIM_CHANNEL_1);
+ARM GAS  /tmp/ccd93dhD.s 			page 4
+
+
+ 122:Core/Src/welder.c ****     HAL_TIM_Base_Start_IT(&htim11);
+ 123:Core/Src/welder.c **** 
+ 124:Core/Src/welder.c ****     while (1) // main program loop
+ 125:Core/Src/welder.c ****     {
+ 126:Core/Src/welder.c ****         state_machine();
+ 127:Core/Src/welder.c ****     }
+ 128:Core/Src/welder.c **** }
+ 129:Core/Src/welder.c **** 
+ 130:Core/Src/welder.c **** 
+ 131:Core/Src/welder.c **** void idle_menu(){
+  48              		.loc 1 131 17 view -0
+  49              		.cfi_startproc
+  50              		@ args = 0, pretend = 0, frame = 16
+  51              		@ frame_needed = 0, uses_anonymous_args = 0
+  52 0000 2DE9F041 		push	{r4, r5, r6, r7, r8, lr}
+  53              		.cfi_def_cfa_offset 24
+  54              		.cfi_offset 4, -24
+  55              		.cfi_offset 5, -20
+  56              		.cfi_offset 6, -16
+  57              		.cfi_offset 7, -12
+  58              		.cfi_offset 8, -8
+  59              		.cfi_offset 14, -4
+  60 0004 86B0     		sub	sp, sp, #24
+  61              		.cfi_def_cfa_offset 48
+ 132:Core/Src/welder.c ****     int16_t encoder_counter = __HAL_TIM_GET_COUNTER(&htim2);
+  62              		.loc 1 132 5 view .LVU1
+  63              		.loc 1 132 31 is_stmt 0 view .LVU2
+  64 0006 884B     		ldr	r3, .L38
+  65 0008 1B68     		ldr	r3, [r3]
+  66 000a 5D6A     		ldr	r5, [r3, #36]
+  67              		.loc 1 132 13 view .LVU3
+  68 000c 2EB2     		sxth	r6, r5
+  69              	.LVL0:
+ 133:Core/Src/welder.c ****     static int16_t enc_last = 0;
+  70              		.loc 1 133 5 is_stmt 1 view .LVU4
+ 134:Core/Src/welder.c ****     static uint8_t menu = 0;
+  71              		.loc 1 134 5 view .LVU5
+ 135:Core/Src/welder.c ****     static uint32_t last_millis = 0;
+  72              		.loc 1 135 5 view .LVU6
+ 136:Core/Src/welder.c ****     char str[10];
+  73              		.loc 1 136 5 view .LVU7
+ 137:Core/Src/welder.c **** 
+ 138:Core/Src/welder.c ****     #ifdef DEBUG
+ 139:Core/Src/welder.c ****         ssd1306_Fill(0);
+ 140:Core/Src/welder.c ****         ssd1306_SetCursor(10, 0);
+ 141:Core/Src/welder.c ****         snprintf(str, sizeof(str), "%d", adc_buffer[0]);
+ 142:Core/Src/welder.c ****         ssd1306_WriteString(str, Font_11x18, 1);
+ 143:Core/Src/welder.c ****         ssd1306_SetCursor(80, 0);
+ 144:Core/Src/welder.c ****         snprintf(str, sizeof(str), "%d", adc_buffer[1]);
+ 145:Core/Src/welder.c ****         ssd1306_WriteString(str, Font_11x18, 1);
+ 146:Core/Src/welder.c **** 
+ 147:Core/Src/welder.c ****         ssd1306_SetCursor(10, 30);
+ 148:Core/Src/welder.c ****         snprintf(str, sizeof(str), "%d", encoder_counter);
+ 149:Core/Src/welder.c ****         ssd1306_WriteString(str, Font_11x18, 1);
+ 150:Core/Src/welder.c ****         ssd1306_SetCursor(80, 30);
+ 151:Core/Src/welder.c ****         snprintf(str, sizeof(str), "%d", state);
+ 152:Core/Src/welder.c ****         ssd1306_WriteString(str, Font_11x18, 1);
+ARM GAS  /tmp/ccd93dhD.s 			page 5
+
+
+ 153:Core/Src/welder.c ****         
+ 154:Core/Src/welder.c ****     #else
+ 155:Core/Src/welder.c ****     ssd1306_Fill(0);
+  74              		.loc 1 155 5 view .LVU8
+  75 000e 0020     		movs	r0, #0
+  76 0010 FFF7FEFF 		bl	ssd1306_Fill
+  77              	.LVL1:
+ 156:Core/Src/welder.c ****         if(encoder_button && !menu){
+  78              		.loc 1 156 9 view .LVU9
+  79              		.loc 1 156 12 is_stmt 0 view .LVU10
+  80 0014 854B     		ldr	r3, .L38+4
+  81 0016 1B78     		ldrb	r3, [r3]	@ zero_extendqisi2
+  82              		.loc 1 156 11 view .LVU11
+  83 0018 1BB1     		cbz	r3, .L2
+  84              		.loc 1 156 30 discriminator 1 view .LVU12
+  85 001a 854B     		ldr	r3, .L38+8
+  86 001c 1B78     		ldrb	r3, [r3]	@ zero_extendqisi2
+  87              		.loc 1 156 27 discriminator 1 view .LVU13
+  88 001e 002B     		cmp	r3, #0
+  89 0020 44D0     		beq	.L32
+  90              	.L2:
+ 157:Core/Src/welder.c ****             menu = 1;
+ 158:Core/Src/welder.c ****             last_millis = HAL_GetTick();
+ 159:Core/Src/welder.c ****             encoder_button = 0;
+ 160:Core/Src/welder.c ****         }
+ 161:Core/Src/welder.c **** 
+ 162:Core/Src/welder.c ****         if(menu){
+  91              		.loc 1 162 9 is_stmt 1 view .LVU14
+  92              		.loc 1 162 12 is_stmt 0 view .LVU15
+  93 0022 834B     		ldr	r3, .L38+8
+  94 0024 1C78     		ldrb	r4, [r3]	@ zero_extendqisi2
+  95              		.loc 1 162 11 view .LVU16
+  96 0026 002C     		cmp	r4, #0
+  97 0028 00F08781 		beq	.L3
+  98              	.LBB2:
+ 163:Core/Src/welder.c ****             static int i = 1;
+  99              		.loc 1 163 13 is_stmt 1 view .LVU17
+ 164:Core/Src/welder.c ****             uint8_t a = 0;
+ 100              		.loc 1 164 13 view .LVU18
+ 101              	.LVL2:
+ 165:Core/Src/welder.c ****             static uint8_t set = 0;
+ 102              		.loc 1 165 13 view .LVU19
+ 166:Core/Src/welder.c ****             if(encoder_button){
+ 103              		.loc 1 166 13 view .LVU20
+ 104              		.loc 1 166 16 is_stmt 0 view .LVU21
+ 105 002c 7F4B     		ldr	r3, .L38+4
+ 106 002e 1B78     		ldrb	r3, [r3]	@ zero_extendqisi2
+ 107              		.loc 1 166 15 view .LVU22
+ 108 0030 3BB1     		cbz	r3, .L4
+ 167:Core/Src/welder.c ****                     set ^= 1;
+ 109              		.loc 1 167 21 is_stmt 1 view .LVU23
+ 110              		.loc 1 167 25 is_stmt 0 view .LVU24
+ 111 0032 804A     		ldr	r2, .L38+12
+ 112 0034 1378     		ldrb	r3, [r2]	@ zero_extendqisi2
+ 113 0036 83F00103 		eor	r3, r3, #1
+ 114 003a 1370     		strb	r3, [r2]
+ 168:Core/Src/welder.c ****                     encoder_button = 0;
+ARM GAS  /tmp/ccd93dhD.s 			page 6
+
+
+ 115              		.loc 1 168 21 is_stmt 1 view .LVU25
+ 116              		.loc 1 168 36 is_stmt 0 view .LVU26
+ 117 003c 7B4B     		ldr	r3, .L38+4
+ 118 003e 0022     		movs	r2, #0
+ 119 0040 1A70     		strb	r2, [r3]
+ 120              	.L4:
+ 169:Core/Src/welder.c ****                 }
+ 170:Core/Src/welder.c ****                 
+ 171:Core/Src/welder.c ****             if(enc_last != encoder_counter && encoder_counter % 2 == 0 && !set){
+ 121              		.loc 1 171 13 is_stmt 1 view .LVU27
+ 122              		.loc 1 171 25 is_stmt 0 view .LVU28
+ 123 0042 7D4B     		ldr	r3, .L38+16
+ 124 0044 B3F90030 		ldrsh	r3, [r3]
+ 125              		.loc 1 171 15 view .LVU29
+ 126 0048 B342     		cmp	r3, r6
+ 127 004a 11D0     		beq	.L5
+ 128              		.loc 1 171 44 discriminator 1 view .LVU30
+ 129 004c 15F0010F 		tst	r5, #1
+ 130 0050 0ED1     		bne	.L5
+ 131              		.loc 1 171 75 discriminator 2 view .LVU31
+ 132 0052 784A     		ldr	r2, .L38+12
+ 133 0054 1278     		ldrb	r2, [r2]	@ zero_extendqisi2
+ 134              		.loc 1 171 72 discriminator 2 view .LVU32
+ 135 0056 5AB9     		cbnz	r2, .L5
+ 172:Core/Src/welder.c ****                 if(enc_last < encoder_counter) i++;
+ 136              		.loc 1 172 17 is_stmt 1 view .LVU33
+ 137              		.loc 1 172 19 is_stmt 0 view .LVU34
+ 138 0058 B342     		cmp	r3, r6
+ 139 005a 32DA     		bge	.L6
+ 140              		.loc 1 172 48 is_stmt 1 discriminator 1 view .LVU35
+ 141              		.loc 1 172 49 is_stmt 0 discriminator 1 view .LVU36
+ 142 005c 774A     		ldr	r2, .L38+20
+ 143 005e 1368     		ldr	r3, [r2]
+ 144 0060 0133     		adds	r3, r3, #1
+ 145 0062 1360     		str	r3, [r2]
+ 146              	.L7:
+ 173:Core/Src/welder.c ****                 else i--;
+ 174:Core/Src/welder.c ****                 last_millis = HAL_GetTick();
+ 147              		.loc 1 174 17 is_stmt 1 view .LVU37
+ 148              		.loc 1 174 31 is_stmt 0 view .LVU38
+ 149 0064 FFF7FEFF 		bl	HAL_GetTick
+ 150              	.LVL3:
+ 151              		.loc 1 174 29 discriminator 1 view .LVU39
+ 152 0068 754B     		ldr	r3, .L38+24
+ 153 006a 1860     		str	r0, [r3]
+ 175:Core/Src/welder.c ****                 enc_last = encoder_counter;
+ 154              		.loc 1 175 17 is_stmt 1 view .LVU40
+ 155              		.loc 1 175 26 is_stmt 0 view .LVU41
+ 156 006c 724B     		ldr	r3, .L38+16
+ 157 006e 1E80     		strh	r6, [r3]	@ movhi
+ 158              	.L5:
+ 176:Core/Src/welder.c ****             }
+ 177:Core/Src/welder.c **** 
+ 178:Core/Src/welder.c ****             switch (i)
+ 159              		.loc 1 178 13 is_stmt 1 view .LVU42
+ 160 0070 724B     		ldr	r3, .L38+20
+ 161 0072 1B68     		ldr	r3, [r3]
+ARM GAS  /tmp/ccd93dhD.s 			page 7
+
+
+ 162 0074 012B     		cmp	r3, #1
+ 163 0076 29D0     		beq	.L8
+ 164 0078 022B     		cmp	r3, #2
+ 165 007a 00F0B280 		beq	.L9
+ 166              	.LBB3:
+ 179:Core/Src/welder.c ****             {
+ 180:Core/Src/welder.c ****             case 1:
+ 181:Core/Src/welder.c ****                 
+ 182:Core/Src/welder.c ****                 uint16_t c = preflow_time/1000;
+ 183:Core/Src/welder.c ****                 uint16_t b = (preflow_time - c*1000)/100;
+ 184:Core/Src/welder.c ****                 snprintf(str,sizeof(str),"%d.%dS",c, b);
+ 185:Core/Src/welder.c ****                 
+ 186:Core/Src/welder.c ****                 for(int j = 0; j<10; j++) if(str[j] != 0) a++;
+ 187:Core/Src/welder.c ****                 ssd1306_SetCursor(64-(16*a/2), 32);
+ 188:Core/Src/welder.c ****                 ssd1306_WriteString(str, Font_16x26, 1);
+ 189:Core/Src/welder.c **** 
+ 190:Core/Src/welder.c ****                 if(enc_last != encoder_counter && encoder_counter % 2 == 0 && set){
+ 191:Core/Src/welder.c ****                     if(enc_last < encoder_counter) preflow_time += (encoder_counter - enc_last)*50;
+ 192:Core/Src/welder.c ****                     else preflow_time -= (enc_last - encoder_counter)*50;
+ 193:Core/Src/welder.c ****                     enc_last = encoder_counter;
+ 194:Core/Src/welder.c ****                 }        
+ 195:Core/Src/welder.c ****                 if(HAL_GetTick() - last_millis >= 500 && set){
+ 196:Core/Src/welder.c ****                     // ssd1306_SetCursor(0, 32);
+ 197:Core/Src/welder.c ****                     // ssd1306_WriteString(str, Font_16x26, 1);
+ 198:Core/Src/welder.c ****                     ssd1306_SetCursor(64-11*3.5,0);
+ 199:Core/Src/welder.c ****                     ssd1306_WriteString("Preflow", Font_11x18,0);
+ 200:Core/Src/welder.c ****                     if(HAL_GetTick() - last_millis >= 1000) last_millis = HAL_GetTick();
+ 201:Core/Src/welder.c ****                 }else{
+ 202:Core/Src/welder.c ****                     ssd1306_SetCursor(64-11*3.5,0);
+ 203:Core/Src/welder.c ****                     ssd1306_WriteString("Preflow", Font_11x18,1);
+ 204:Core/Src/welder.c ****                 }
+ 205:Core/Src/welder.c ****                 break;
+ 206:Core/Src/welder.c ****             
+ 207:Core/Src/welder.c ****                 case 2:
+ 208:Core/Src/welder.c ****                 ssd1306_SetCursor(64-11*3.5,0);
+ 209:Core/Src/welder.c ****                 ssd1306_WriteString("Upslope", Font_11x18,1);
+ 210:Core/Src/welder.c ****                 snprintf(str,sizeof(str),"%dmS",upslope_time);
+ 211:Core/Src/welder.c ****                 for(int j = 0; j<10; j++) if(str[j] != 0) a++;
+ 212:Core/Src/welder.c ****                 ssd1306_SetCursor(64-(16*a/2), 32);
+ 213:Core/Src/welder.c ****                 ssd1306_WriteString(str, Font_16x26, 1);
+ 214:Core/Src/welder.c **** 
+ 215:Core/Src/welder.c ****                 if(enc_last != encoder_counter && encoder_counter % 2 == 0 && set){
+ 216:Core/Src/welder.c ****                     if(enc_last < encoder_counter) upslope_time += (encoder_counter - enc_last)*50;
+ 217:Core/Src/welder.c ****                     else upslope_time -= (enc_last - encoder_counter)*50;
+ 218:Core/Src/welder.c ****                     enc_last = encoder_counter;
+ 219:Core/Src/welder.c ****                 }        
+ 220:Core/Src/welder.c ****                 if(HAL_GetTick() - last_millis >= 500 && set){
+ 221:Core/Src/welder.c ****                     // ssd1306_SetCursor(0, 32);
+ 222:Core/Src/welder.c ****                     // ssd1306_WriteString(str, Font_16x26, 1);
+ 223:Core/Src/welder.c ****                     ssd1306_SetCursor(64-11*3.5,0);
+ 224:Core/Src/welder.c ****                     ssd1306_WriteString("Upslope", Font_11x18,0);
+ 225:Core/Src/welder.c ****                     if(HAL_GetTick() - last_millis >= 1000) last_millis = HAL_GetTick();
+ 226:Core/Src/welder.c ****                 }else{
+ 227:Core/Src/welder.c ****                     ssd1306_SetCursor(64-11*3.5,0);
+ 228:Core/Src/welder.c ****                     ssd1306_WriteString("Upslope", Font_11x18,1);
+ 229:Core/Src/welder.c ****                 }
+ 230:Core/Src/welder.c ****                 break;
+ARM GAS  /tmp/ccd93dhD.s 			page 8
+
+
+ 231:Core/Src/welder.c **** 
+ 232:Core/Src/welder.c ****                 break;
+ 233:Core/Src/welder.c ****             
+ 234:Core/Src/welder.c ****             default:
+ 235:Core/Src/welder.c ****                 i = 1;
+ 167              		.loc 1 235 17 view .LVU43
+ 168              		.loc 1 235 19 is_stmt 0 view .LVU44
+ 169 007e 6F4B     		ldr	r3, .L38+20
+ 170 0080 0122     		movs	r2, #1
+ 171 0082 1A60     		str	r2, [r3]
+ 236:Core/Src/welder.c ****                 break;
+ 172              		.loc 1 236 17 is_stmt 1 view .LVU45
+ 173              	.LVL4:
+ 174              	.L18:
+ 175              		.loc 1 236 17 is_stmt 0 view .LVU46
+ 176              	.LBE3:
+ 237:Core/Src/welder.c ****             }
+ 238:Core/Src/welder.c ****             if(HAL_GetTick() - last_millis > 10000) {
+ 177              		.loc 1 238 13 is_stmt 1 view .LVU47
+ 178              		.loc 1 238 16 is_stmt 0 view .LVU48
+ 179 0084 FFF7FEFF 		bl	HAL_GetTick
+ 180              	.LVL5:
+ 181              		.loc 1 238 30 discriminator 1 view .LVU49
+ 182 0088 6D4B     		ldr	r3, .L38+24
+ 183 008a 1B68     		ldr	r3, [r3]
+ 184 008c C01A     		subs	r0, r0, r3
+ 185              		.loc 1 238 15 discriminator 1 view .LVU50
+ 186 008e 42F21073 		movw	r3, #10000
+ 187 0092 9842     		cmp	r0, r3
+ 188 0094 05D9     		bls	.L26
+ 239:Core/Src/welder.c ****                 menu = 0;
+ 189              		.loc 1 239 17 is_stmt 1 view .LVU51
+ 190              		.loc 1 239 22 is_stmt 0 view .LVU52
+ 191 0096 664B     		ldr	r3, .L38+8
+ 192 0098 0022     		movs	r2, #0
+ 193 009a 1A70     		strb	r2, [r3]
+ 240:Core/Src/welder.c ****                 i = 1;
+ 194              		.loc 1 240 17 is_stmt 1 view .LVU53
+ 195              		.loc 1 240 19 is_stmt 0 view .LVU54
+ 196 009c 674B     		ldr	r3, .L38+20
+ 197 009e 0122     		movs	r2, #1
+ 198 00a0 1A60     		str	r2, [r3]
+ 199              	.LVL6:
+ 200              	.L26:
+ 201              		.loc 1 240 19 view .LVU55
+ 202              	.LBE2:
+ 241:Core/Src/welder.c ****             }
+ 242:Core/Src/welder.c ****         }
+ 243:Core/Src/welder.c **** 
+ 244:Core/Src/welder.c ****         // if(clicked){
+ 245:Core/Src/welder.c ****         //     static int8_t i = 0;
+ 246:Core/Src/welder.c ****         //     static uint8_t set = 0;
+ 247:Core/Src/welder.c **** 
+ 248:Core/Src/welder.c ****         //     if(enc_last != encoder_counter && encoder_counter % 2 == 0 && !set){
+ 249:Core/Src/welder.c ****         //         if(enc_last < encoder_counter) i++;
+ 250:Core/Src/welder.c ****         //         else i--;
+ 251:Core/Src/welder.c ****         //         enc_last = encoder_counter;
+ARM GAS  /tmp/ccd93dhD.s 			page 9
+
+
+ 252:Core/Src/welder.c ****         //     }
+ 253:Core/Src/welder.c **** 
+ 254:Core/Src/welder.c ****         //     if(encoder_button){
+ 255:Core/Src/welder.c ****         //         set ^= 1;
+ 256:Core/Src/welder.c ****         //         encoder_button = 0;
+ 257:Core/Src/welder.c ****         //     }
+ 258:Core/Src/welder.c **** 
+ 259:Core/Src/welder.c ****         //     switch (i)
+ 260:Core/Src/welder.c ****         //     {
+ 261:Core/Src/welder.c ****         //     case -1: i = 2; break; 
+ 262:Core/Src/welder.c ****         //     case 0:
+ 263:Core/Src/welder.c ****         //         // ssd1306_Line(0,20,18,20,1);
+ 264:Core/Src/welder.c ****         //         ssd1306_FillRectangle(0,20,18,22,1);
+ 265:Core/Src/welder.c ****         //         if(enc_last != encoder_counter && encoder_counter % 2 == 0 && set){
+ 266:Core/Src/welder.c ****         //             trigger_type ^= _2T&_4T;
+ 267:Core/Src/welder.c ****         //             enc_last = encoder_counter;
+ 268:Core/Src/welder.c ****         //         }
+ 269:Core/Src/welder.c ****         //         break;
+ 270:Core/Src/welder.c ****         //     case 1:
+ 271:Core/Src/welder.c ****         //         ssd1306_FillRectangle(54,20,54+18,22,1);
+ 272:Core/Src/welder.c ****         //         if(enc_last != encoder_counter && encoder_counter % 2 == 0 && set){
+ 273:Core/Src/welder.c ****         //             welding_mode ^= (1<<0 | 1<<1);
+ 274:Core/Src/welder.c ****         //             enc_last = encoder_counter;
+ 275:Core/Src/welder.c ****         //         }
+ 276:Core/Src/welder.c ****         //         break;
+ 277:Core/Src/welder.c ****         //     case 2:
+ 278:Core/Src/welder.c ****         //         if(set){
+ 279:Core/Src/welder.c ****         //             set = 0;
+ 280:Core/Src/welder.c ****         //             i = 0;
+ 281:Core/Src/welder.c ****         //             clicked = 0;
+ 282:Core/Src/welder.c ****         //         }
+ 283:Core/Src/welder.c ****         //     break;
+ 284:Core/Src/welder.c ****         //     default:
+ 285:Core/Src/welder.c ****         //         clicked = 0;
+ 286:Core/Src/welder.c ****         //         i = 0;
+ 287:Core/Src/welder.c ****         //         break;
+ 288:Core/Src/welder.c ****         //     }
+ 289:Core/Src/welder.c ****         // }
+ 290:Core/Src/welder.c ****         
+ 291:Core/Src/welder.c ****         else{
+ 292:Core/Src/welder.c ****             ssd1306_SetCursor(0,0);
+ 293:Core/Src/welder.c ****             snprintf(str,sizeof(str), "%dT", trigger_type);
+ 294:Core/Src/welder.c ****             ssd1306_WriteString(str, Font_11x18, 1);
+ 295:Core/Src/welder.c **** 
+ 296:Core/Src/welder.c ****             ssd1306_SetCursor(64-11,0);
+ 297:Core/Src/welder.c ****             snprintf(str,sizeof(str), mode_string[(welding_mode & 3) - 1]);
+ 298:Core/Src/welder.c ****             ssd1306_WriteString(str, Font_11x18, 1);
+ 299:Core/Src/welder.c **** 
+ 300:Core/Src/welder.c ****             if(welding_mode & Pulse){
+ 301:Core/Src/welder.c ****                 ssd1306_SetCursor(128-(11*3),0);
+ 302:Core/Src/welder.c ****                 snprintf(str,sizeof(str), mode_string[2]);
+ 303:Core/Src/welder.c ****                 ssd1306_WriteString(str, Font_11x18, 1);
+ 304:Core/Src/welder.c ****             }
+ 305:Core/Src/welder.c **** 
+ 306:Core/Src/welder.c ****             snprintf(str,sizeof(str), "%d", (int)adc_buffer[0]);
+ 307:Core/Src/welder.c ****             int b = adc_buffer[0];
+ 308:Core/Src/welder.c ****             uint8_t a = 0;
+ARM GAS  /tmp/ccd93dhD.s 			page 10
+
+
+ 309:Core/Src/welder.c ****             while(b > 0) {a++; b /= 10;};
+ 310:Core/Src/welder.c ****             ssd1306_SetCursor(64-(16*a/2), 48 - (26/2));
+ 311:Core/Src/welder.c ****             ssd1306_WriteString(str, Font_16x26, 1);
+ 312:Core/Src/welder.c ****         }
+ 313:Core/Src/welder.c ****     #endif
+ 314:Core/Src/welder.c ****     ssd1306_UpdateScreen();
+ 203              		.loc 1 314 5 is_stmt 1 view .LVU56
+ 204 00a2 FFF7FEFF 		bl	ssd1306_UpdateScreen
+ 205              	.LVL7:
+ 315:Core/Src/welder.c **** }
+ 206              		.loc 1 315 1 is_stmt 0 view .LVU57
+ 207 00a6 06B0     		add	sp, sp, #24
+ 208              		.cfi_remember_state
+ 209              		.cfi_def_cfa_offset 24
+ 210              		@ sp needed
+ 211 00a8 BDE8F081 		pop	{r4, r5, r6, r7, r8, pc}
+ 212              	.LVL8:
+ 213              	.L32:
+ 214              		.cfi_restore_state
+ 157:Core/Src/welder.c ****             last_millis = HAL_GetTick();
+ 215              		.loc 1 157 13 is_stmt 1 view .LVU58
+ 157:Core/Src/welder.c ****             last_millis = HAL_GetTick();
+ 216              		.loc 1 157 18 is_stmt 0 view .LVU59
+ 217 00ac 604B     		ldr	r3, .L38+8
+ 218 00ae 0122     		movs	r2, #1
+ 219 00b0 1A70     		strb	r2, [r3]
+ 158:Core/Src/welder.c ****             encoder_button = 0;
+ 220              		.loc 1 158 13 is_stmt 1 view .LVU60
+ 158:Core/Src/welder.c ****             encoder_button = 0;
+ 221              		.loc 1 158 27 is_stmt 0 view .LVU61
+ 222 00b2 FFF7FEFF 		bl	HAL_GetTick
+ 223              	.LVL9:
+ 158:Core/Src/welder.c ****             encoder_button = 0;
+ 224              		.loc 1 158 25 discriminator 1 view .LVU62
+ 225 00b6 624B     		ldr	r3, .L38+24
+ 226 00b8 1860     		str	r0, [r3]
+ 159:Core/Src/welder.c ****         }
+ 227              		.loc 1 159 13 is_stmt 1 view .LVU63
+ 159:Core/Src/welder.c ****         }
+ 228              		.loc 1 159 28 is_stmt 0 view .LVU64
+ 229 00ba 5C4B     		ldr	r3, .L38+4
+ 230 00bc 0022     		movs	r2, #0
+ 231 00be 1A70     		strb	r2, [r3]
+ 232 00c0 AFE7     		b	.L2
+ 233              	.LVL10:
+ 234              	.L6:
+ 235              	.LBB11:
+ 173:Core/Src/welder.c ****                 last_millis = HAL_GetTick();
+ 236              		.loc 1 173 22 is_stmt 1 view .LVU65
+ 173:Core/Src/welder.c ****                 last_millis = HAL_GetTick();
+ 237              		.loc 1 173 23 is_stmt 0 view .LVU66
+ 238 00c2 5E4A     		ldr	r2, .L38+20
+ 239 00c4 1368     		ldr	r3, [r2]
+ 240 00c6 013B     		subs	r3, r3, #1
+ 241 00c8 1360     		str	r3, [r2]
+ 242 00ca CBE7     		b	.L7
+ 243              	.L8:
+ARM GAS  /tmp/ccd93dhD.s 			page 11
+
+
+ 244              	.LBB8:
+ 182:Core/Src/welder.c ****                 uint16_t b = (preflow_time - c*1000)/100;
+ 245              		.loc 1 182 17 is_stmt 1 view .LVU67
+ 182:Core/Src/welder.c ****                 uint16_t b = (preflow_time - c*1000)/100;
+ 246              		.loc 1 182 26 is_stmt 0 view .LVU68
+ 247 00cc 5D4B     		ldr	r3, .L38+28
+ 248 00ce 1A88     		ldrh	r2, [r3]
+ 249 00d0 5D4B     		ldr	r3, .L38+32
+ 250 00d2 A3FB0213 		umull	r1, r3, r3, r2
+ 251 00d6 9B09     		lsrs	r3, r3, #6
+ 252              	.LVL11:
+ 183:Core/Src/welder.c ****                 snprintf(str,sizeof(str),"%d.%dS",c, b);
+ 253              		.loc 1 183 17 is_stmt 1 view .LVU69
+ 183:Core/Src/welder.c ****                 snprintf(str,sizeof(str),"%d.%dS",c, b);
+ 254              		.loc 1 183 44 is_stmt 0 view .LVU70
+ 255 00d8 5C49     		ldr	r1, .L38+36
+ 256 00da 01FB0322 		mla	r2, r1, r3, r2
+ 183:Core/Src/welder.c ****                 snprintf(str,sizeof(str),"%d.%dS",c, b);
+ 257              		.loc 1 183 53 view .LVU71
+ 258 00de 5C49     		ldr	r1, .L38+40
+ 259 00e0 81FB0201 		smull	r0, r1, r1, r2
+ 260 00e4 D217     		asrs	r2, r2, #31
+ 261 00e6 C2EB6112 		rsb	r2, r2, r1, asr #5
+ 262              	.LVL12:
+ 184:Core/Src/welder.c ****                 
+ 263              		.loc 1 184 17 is_stmt 1 view .LVU72
+ 264 00ea 92B2     		uxth	r2, r2
+ 184:Core/Src/welder.c ****                 
+ 265              		.loc 1 184 17 is_stmt 0 view .LVU73
+ 266 00ec 0092     		str	r2, [sp]
+ 267 00ee 594A     		ldr	r2, .L38+44
+ 268              	.LVL13:
+ 184:Core/Src/welder.c ****                 
+ 269              		.loc 1 184 17 view .LVU74
+ 270 00f0 0A21     		movs	r1, #10
+ 271 00f2 03A8     		add	r0, sp, #12
+ 272 00f4 FFF7FEFF 		bl	snprintf
+ 273              	.LVL14:
+ 186:Core/Src/welder.c ****                 ssd1306_SetCursor(64-(16*a/2), 32);
+ 274              		.loc 1 186 17 is_stmt 1 view .LVU75
+ 275              	.LBB4:
+ 186:Core/Src/welder.c ****                 ssd1306_SetCursor(64-(16*a/2), 32);
+ 276              		.loc 1 186 21 view .LVU76
+ 186:Core/Src/welder.c ****                 ssd1306_SetCursor(64-(16*a/2), 32);
+ 277              		.loc 1 186 25 is_stmt 0 view .LVU77
+ 278 00f8 0023     		movs	r3, #0
+ 279              	.LBE4:
+ 280              	.LBE8:
+ 164:Core/Src/welder.c ****             static uint8_t set = 0;
+ 281              		.loc 1 164 21 view .LVU78
+ 282 00fa 1846     		mov	r0, r3
+ 283              	.LBB9:
+ 284              	.LBB5:
+ 186:Core/Src/welder.c ****                 ssd1306_SetCursor(64-(16*a/2), 32);
+ 285              		.loc 1 186 17 view .LVU79
+ 286 00fc 00E0     		b	.L11
+ 287              	.LVL15:
+ARM GAS  /tmp/ccd93dhD.s 			page 12
+
+
+ 288              	.L12:
+ 186:Core/Src/welder.c ****                 ssd1306_SetCursor(64-(16*a/2), 32);
+ 289              		.loc 1 186 39 is_stmt 1 discriminator 4 view .LVU80
+ 290 00fe 0133     		adds	r3, r3, #1
+ 291              	.LVL16:
+ 292              	.L11:
+ 186:Core/Src/welder.c ****                 ssd1306_SetCursor(64-(16*a/2), 32);
+ 293              		.loc 1 186 33 discriminator 5 view .LVU81
+ 294 0100 092B     		cmp	r3, #9
+ 295 0102 09DC     		bgt	.L33
+ 186:Core/Src/welder.c ****                 ssd1306_SetCursor(64-(16*a/2), 32);
+ 296              		.loc 1 186 43 discriminator 6 view .LVU82
+ 186:Core/Src/welder.c ****                 ssd1306_SetCursor(64-(16*a/2), 32);
+ 297              		.loc 1 186 49 is_stmt 0 discriminator 6 view .LVU83
+ 298 0104 03F11802 		add	r2, r3, #24
+ 299 0108 6A44     		add	r2, sp, r2
+ 300 010a 12F80C2C 		ldrb	r2, [r2, #-12]	@ zero_extendqisi2
+ 186:Core/Src/welder.c ****                 ssd1306_SetCursor(64-(16*a/2), 32);
+ 301              		.loc 1 186 45 discriminator 6 view .LVU84
+ 302 010e 002A     		cmp	r2, #0
+ 303 0110 F5D0     		beq	.L12
+ 186:Core/Src/welder.c ****                 ssd1306_SetCursor(64-(16*a/2), 32);
+ 304              		.loc 1 186 59 is_stmt 1 discriminator 2 view .LVU85
+ 186:Core/Src/welder.c ****                 ssd1306_SetCursor(64-(16*a/2), 32);
+ 305              		.loc 1 186 60 is_stmt 0 discriminator 2 view .LVU86
+ 306 0112 0130     		adds	r0, r0, #1
+ 307              	.LVL17:
+ 186:Core/Src/welder.c ****                 ssd1306_SetCursor(64-(16*a/2), 32);
+ 308              		.loc 1 186 60 discriminator 2 view .LVU87
+ 309 0114 C0B2     		uxtb	r0, r0
+ 310              	.LVL18:
+ 186:Core/Src/welder.c ****                 ssd1306_SetCursor(64-(16*a/2), 32);
+ 311              		.loc 1 186 60 discriminator 2 view .LVU88
+ 312 0116 F2E7     		b	.L12
+ 313              	.LVL19:
+ 314              	.L33:
+ 186:Core/Src/welder.c ****                 ssd1306_SetCursor(64-(16*a/2), 32);
+ 315              		.loc 1 186 60 discriminator 2 view .LVU89
+ 316              	.LBE5:
+ 187:Core/Src/welder.c ****                 ssd1306_WriteString(str, Font_16x26, 1);
+ 317              		.loc 1 187 17 is_stmt 1 view .LVU90
+ 187:Core/Src/welder.c ****                 ssd1306_WriteString(str, Font_16x26, 1);
+ 318              		.loc 1 187 37 is_stmt 0 view .LVU91
+ 319 0118 C0F10800 		rsb	r0, r0, #8
+ 320              	.LVL20:
+ 187:Core/Src/welder.c ****                 ssd1306_WriteString(str, Font_16x26, 1);
+ 321              		.loc 1 187 17 view .LVU92
+ 322 011c C000     		lsls	r0, r0, #3
+ 323 011e 2021     		movs	r1, #32
+ 324 0120 00F0F800 		and	r0, r0, #248
+ 325 0124 FFF7FEFF 		bl	ssd1306_SetCursor
+ 326              	.LVL21:
+ 188:Core/Src/welder.c **** 
+ 327              		.loc 1 188 17 is_stmt 1 view .LVU93
+ 328 0128 4B4B     		ldr	r3, .L38+48
+ 329 012a 0122     		movs	r2, #1
+ 330 012c 0092     		str	r2, [sp]
+ARM GAS  /tmp/ccd93dhD.s 			page 13
+
+
+ 331 012e 0ECB     		ldm	r3, {r1, r2, r3}
+ 332 0130 03A8     		add	r0, sp, #12
+ 333 0132 FFF7FEFF 		bl	ssd1306_WriteString
+ 334              	.LVL22:
+ 190:Core/Src/welder.c ****                     if(enc_last < encoder_counter) preflow_time += (encoder_counter - enc_last)*50;
+ 335              		.loc 1 190 17 view .LVU94
+ 190:Core/Src/welder.c ****                     if(enc_last < encoder_counter) preflow_time += (encoder_counter - enc_last)*50;
+ 336              		.loc 1 190 29 is_stmt 0 view .LVU95
+ 337 0136 404B     		ldr	r3, .L38+16
+ 338 0138 B3F90030 		ldrsh	r3, [r3]
+ 190:Core/Src/welder.c ****                     if(enc_last < encoder_counter) preflow_time += (encoder_counter - enc_last)*50;
+ 339              		.loc 1 190 19 view .LVU96
+ 340 013c B342     		cmp	r3, r6
+ 341 013e 13D0     		beq	.L14
+ 190:Core/Src/welder.c ****                     if(enc_last < encoder_counter) preflow_time += (encoder_counter - enc_last)*50;
+ 342              		.loc 1 190 48 discriminator 1 view .LVU97
+ 343 0140 15F0010F 		tst	r5, #1
+ 344 0144 10D1     		bne	.L14
+ 190:Core/Src/welder.c ****                     if(enc_last < encoder_counter) preflow_time += (encoder_counter - enc_last)*50;
+ 345              		.loc 1 190 76 discriminator 2 view .LVU98
+ 346 0146 3B4A     		ldr	r2, .L38+12
+ 347 0148 1278     		ldrb	r2, [r2]	@ zero_extendqisi2
+ 348 014a 6AB1     		cbz	r2, .L14
+ 191:Core/Src/welder.c ****                     else preflow_time -= (enc_last - encoder_counter)*50;
+ 349              		.loc 1 191 21 is_stmt 1 view .LVU99
+ 191:Core/Src/welder.c ****                     else preflow_time -= (enc_last - encoder_counter)*50;
+ 350              		.loc 1 191 23 is_stmt 0 view .LVU100
+ 351 014c B342     		cmp	r3, r6
+ 352 014e 22DA     		bge	.L15
+ 191:Core/Src/welder.c ****                     else preflow_time -= (enc_last - encoder_counter)*50;
+ 353              		.loc 1 191 52 is_stmt 1 discriminator 1 view .LVU101
+ 191:Core/Src/welder.c ****                     else preflow_time -= (enc_last - encoder_counter)*50;
+ 354              		.loc 1 191 85 is_stmt 0 discriminator 1 view .LVU102
+ 355 0150 F31A     		subs	r3, r6, r3
+ 191:Core/Src/welder.c ****                     else preflow_time -= (enc_last - encoder_counter)*50;
+ 356              		.loc 1 191 65 discriminator 1 view .LVU103
+ 357 0152 3C49     		ldr	r1, .L38+28
+ 358 0154 03EB8303 		add	r3, r3, r3, lsl #2
+ 359 0158 03EB8303 		add	r3, r3, r3, lsl #2
+ 360 015c 0A88     		ldrh	r2, [r1]
+ 361 015e 02EB4303 		add	r3, r2, r3, lsl #1
+ 362 0162 0B80     		strh	r3, [r1]	@ movhi
+ 363              	.L16:
+ 193:Core/Src/welder.c ****                 }        
+ 364              		.loc 1 193 21 is_stmt 1 view .LVU104
+ 193:Core/Src/welder.c ****                 }        
+ 365              		.loc 1 193 30 is_stmt 0 view .LVU105
+ 366 0164 344B     		ldr	r3, .L38+16
+ 367 0166 1E80     		strh	r6, [r3]	@ movhi
+ 368              	.L14:
+ 195:Core/Src/welder.c ****                     // ssd1306_SetCursor(0, 32);
+ 369              		.loc 1 195 17 is_stmt 1 view .LVU106
+ 195:Core/Src/welder.c ****                     // ssd1306_SetCursor(0, 32);
+ 370              		.loc 1 195 20 is_stmt 0 view .LVU107
+ 371 0168 FFF7FEFF 		bl	HAL_GetTick
+ 372              	.LVL23:
+ 195:Core/Src/welder.c ****                     // ssd1306_SetCursor(0, 32);
+ARM GAS  /tmp/ccd93dhD.s 			page 14
+
+
+ 373              		.loc 1 195 34 discriminator 1 view .LVU108
+ 374 016c 344B     		ldr	r3, .L38+24
+ 375 016e 1B68     		ldr	r3, [r3]
+ 376 0170 C01A     		subs	r0, r0, r3
+ 195:Core/Src/welder.c ****                     // ssd1306_SetCursor(0, 32);
+ 377              		.loc 1 195 19 discriminator 1 view .LVU109
+ 378 0172 B0F5FA7F 		cmp	r0, #500
+ 379 0176 02D3     		bcc	.L17
+ 195:Core/Src/welder.c ****                     // ssd1306_SetCursor(0, 32);
+ 380              		.loc 1 195 55 discriminator 1 view .LVU110
+ 381 0178 2E4B     		ldr	r3, .L38+12
+ 382 017a 1B78     		ldrb	r3, [r3]	@ zero_extendqisi2
+ 383 017c C3B9     		cbnz	r3, .L34
+ 384              	.L17:
+ 202:Core/Src/welder.c ****                     ssd1306_WriteString("Preflow", Font_11x18,1);
+ 385              		.loc 1 202 21 is_stmt 1 view .LVU111
+ 386 017e 0021     		movs	r1, #0
+ 387 0180 1920     		movs	r0, #25
+ 388 0182 FFF7FEFF 		bl	ssd1306_SetCursor
+ 389              	.LVL24:
+ 203:Core/Src/welder.c ****                 }
+ 390              		.loc 1 203 21 view .LVU112
+ 391 0186 354B     		ldr	r3, .L38+52
+ 392 0188 0122     		movs	r2, #1
+ 393 018a 0092     		str	r2, [sp]
+ 394 018c 0ECB     		ldm	r3, {r1, r2, r3}
+ 395 018e 3448     		ldr	r0, .L38+56
+ 396 0190 FFF7FEFF 		bl	ssd1306_WriteString
+ 397              	.LVL25:
+ 398 0194 76E7     		b	.L18
+ 399              	.L15:
+ 192:Core/Src/welder.c ****                     enc_last = encoder_counter;
+ 400              		.loc 1 192 26 view .LVU113
+ 192:Core/Src/welder.c ****                     enc_last = encoder_counter;
+ 401              		.loc 1 192 52 is_stmt 0 view .LVU114
+ 402 0196 9B1B     		subs	r3, r3, r6
+ 192:Core/Src/welder.c ****                     enc_last = encoder_counter;
+ 403              		.loc 1 192 39 view .LVU115
+ 404 0198 2A49     		ldr	r1, .L38+28
+ 405 019a C3EB8322 		rsb	r2, r3, r3, lsl #10
+ 406 019e 03EB8202 		add	r2, r3, r2, lsl #2
+ 407 01a2 C3EBC203 		rsb	r3, r3, r2, lsl #3
+ 408 01a6 0A88     		ldrh	r2, [r1]
+ 409 01a8 02EB4303 		add	r3, r2, r3, lsl #1
+ 410 01ac 0B80     		strh	r3, [r1]	@ movhi
+ 411 01ae D9E7     		b	.L16
+ 412              	.L34:
+ 198:Core/Src/welder.c ****                     ssd1306_WriteString("Preflow", Font_11x18,0);
+ 413              		.loc 1 198 21 is_stmt 1 view .LVU116
+ 414 01b0 0021     		movs	r1, #0
+ 415 01b2 1920     		movs	r0, #25
+ 416 01b4 FFF7FEFF 		bl	ssd1306_SetCursor
+ 417              	.LVL26:
+ 199:Core/Src/welder.c ****                     if(HAL_GetTick() - last_millis >= 1000) last_millis = HAL_GetTick();
+ 418              		.loc 1 199 21 view .LVU117
+ 419 01b8 284B     		ldr	r3, .L38+52
+ 420 01ba 0022     		movs	r2, #0
+ARM GAS  /tmp/ccd93dhD.s 			page 15
+
+
+ 421 01bc 0092     		str	r2, [sp]
+ 422 01be 0ECB     		ldm	r3, {r1, r2, r3}
+ 423 01c0 2748     		ldr	r0, .L38+56
+ 424 01c2 FFF7FEFF 		bl	ssd1306_WriteString
+ 425              	.LVL27:
+ 200:Core/Src/welder.c ****                 }else{
+ 426              		.loc 1 200 21 view .LVU118
+ 200:Core/Src/welder.c ****                 }else{
+ 427              		.loc 1 200 24 is_stmt 0 view .LVU119
+ 428 01c6 FFF7FEFF 		bl	HAL_GetTick
+ 429              	.LVL28:
+ 200:Core/Src/welder.c ****                 }else{
+ 430              		.loc 1 200 38 discriminator 1 view .LVU120
+ 431 01ca 1D4B     		ldr	r3, .L38+24
+ 432 01cc 1B68     		ldr	r3, [r3]
+ 433 01ce C01A     		subs	r0, r0, r3
+ 200:Core/Src/welder.c ****                 }else{
+ 434              		.loc 1 200 23 discriminator 1 view .LVU121
+ 435 01d0 B0F57A7F 		cmp	r0, #1000
+ 436 01d4 FFF456AF 		bcc	.L18
+ 200:Core/Src/welder.c ****                 }else{
+ 437              		.loc 1 200 61 is_stmt 1 discriminator 1 view .LVU122
+ 200:Core/Src/welder.c ****                 }else{
+ 438              		.loc 1 200 75 is_stmt 0 discriminator 1 view .LVU123
+ 439 01d8 FFF7FEFF 		bl	HAL_GetTick
+ 440              	.LVL29:
+ 200:Core/Src/welder.c ****                 }else{
+ 441              		.loc 1 200 73 discriminator 1 view .LVU124
+ 442 01dc 184B     		ldr	r3, .L38+24
+ 443 01de 1860     		str	r0, [r3]
+ 444 01e0 50E7     		b	.L18
+ 445              	.LVL30:
+ 446              	.L9:
+ 208:Core/Src/welder.c ****                 ssd1306_WriteString("Upslope", Font_11x18,1);
+ 447              		.loc 1 208 17 is_stmt 1 view .LVU125
+ 448 01e2 0021     		movs	r1, #0
+ 449 01e4 1920     		movs	r0, #25
+ 450 01e6 FFF7FEFF 		bl	ssd1306_SetCursor
+ 451              	.LVL31:
+ 209:Core/Src/welder.c ****                 snprintf(str,sizeof(str),"%dmS",upslope_time);
+ 452              		.loc 1 209 17 view .LVU126
+ 453 01ea 1C4B     		ldr	r3, .L38+52
+ 454 01ec 0122     		movs	r2, #1
+ 455 01ee 0092     		str	r2, [sp]
+ 456 01f0 0ECB     		ldm	r3, {r1, r2, r3}
+ 457 01f2 1C48     		ldr	r0, .L38+60
+ 458 01f4 FFF7FEFF 		bl	ssd1306_WriteString
+ 459              	.LVL32:
+ 210:Core/Src/welder.c ****                 for(int j = 0; j<10; j++) if(str[j] != 0) a++;
+ 460              		.loc 1 210 17 view .LVU127
+ 461 01f8 1B4B     		ldr	r3, .L38+64
+ 462 01fa 1B88     		ldrh	r3, [r3]
+ 463 01fc 1B4A     		ldr	r2, .L38+68
+ 464 01fe 0A21     		movs	r1, #10
+ 465 0200 03A8     		add	r0, sp, #12
+ 466 0202 FFF7FEFF 		bl	snprintf
+ 467              	.LVL33:
+ARM GAS  /tmp/ccd93dhD.s 			page 16
+
+
+ 211:Core/Src/welder.c ****                 ssd1306_SetCursor(64-(16*a/2), 32);
+ 468              		.loc 1 211 17 view .LVU128
+ 469              	.LBB6:
+ 211:Core/Src/welder.c ****                 ssd1306_SetCursor(64-(16*a/2), 32);
+ 470              		.loc 1 211 21 view .LVU129
+ 211:Core/Src/welder.c ****                 ssd1306_SetCursor(64-(16*a/2), 32);
+ 471              		.loc 1 211 25 is_stmt 0 view .LVU130
+ 472 0206 0023     		movs	r3, #0
+ 473              	.LBE6:
+ 474              	.LBE9:
+ 164:Core/Src/welder.c ****             static uint8_t set = 0;
+ 475              		.loc 1 164 21 view .LVU131
+ 476 0208 1846     		mov	r0, r3
+ 477              	.LBB10:
+ 478              	.LBB7:
+ 211:Core/Src/welder.c ****                 ssd1306_SetCursor(64-(16*a/2), 32);
+ 479              		.loc 1 211 17 view .LVU132
+ 480 020a 00E0     		b	.L19
+ 481              	.LVL34:
+ 482              	.L20:
+ 211:Core/Src/welder.c ****                 ssd1306_SetCursor(64-(16*a/2), 32);
+ 483              		.loc 1 211 39 is_stmt 1 discriminator 4 view .LVU133
+ 484 020c 0133     		adds	r3, r3, #1
+ 485              	.LVL35:
+ 486              	.L19:
+ 211:Core/Src/welder.c ****                 ssd1306_SetCursor(64-(16*a/2), 32);
+ 487              		.loc 1 211 33 discriminator 5 view .LVU134
+ 488 020e 092B     		cmp	r3, #9
+ 489 0210 2EDC     		bgt	.L35
+ 211:Core/Src/welder.c ****                 ssd1306_SetCursor(64-(16*a/2), 32);
+ 490              		.loc 1 211 43 discriminator 6 view .LVU135
+ 211:Core/Src/welder.c ****                 ssd1306_SetCursor(64-(16*a/2), 32);
+ 491              		.loc 1 211 49 is_stmt 0 discriminator 6 view .LVU136
+ 492 0212 03F11802 		add	r2, r3, #24
+ 493 0216 6A44     		add	r2, sp, r2
+ 494 0218 12F80C2C 		ldrb	r2, [r2, #-12]	@ zero_extendqisi2
+ 211:Core/Src/welder.c ****                 ssd1306_SetCursor(64-(16*a/2), 32);
+ 495              		.loc 1 211 45 discriminator 6 view .LVU137
+ 496 021c 002A     		cmp	r2, #0
+ 497 021e F5D0     		beq	.L20
+ 211:Core/Src/welder.c ****                 ssd1306_SetCursor(64-(16*a/2), 32);
+ 498              		.loc 1 211 59 is_stmt 1 discriminator 2 view .LVU138
+ 211:Core/Src/welder.c ****                 ssd1306_SetCursor(64-(16*a/2), 32);
+ 499              		.loc 1 211 60 is_stmt 0 discriminator 2 view .LVU139
+ 500 0220 0130     		adds	r0, r0, #1
+ 501              	.LVL36:
+ 211:Core/Src/welder.c ****                 ssd1306_SetCursor(64-(16*a/2), 32);
+ 502              		.loc 1 211 60 discriminator 2 view .LVU140
+ 503 0222 C0B2     		uxtb	r0, r0
+ 504              	.LVL37:
+ 211:Core/Src/welder.c ****                 ssd1306_SetCursor(64-(16*a/2), 32);
+ 505              		.loc 1 211 60 discriminator 2 view .LVU141
+ 506 0224 F2E7     		b	.L20
+ 507              	.L39:
+ 508 0226 00BF     		.align	2
+ 509              	.L38:
+ 510 0228 00000000 		.word	htim2
+ARM GAS  /tmp/ccd93dhD.s 			page 17
+
+
+ 511 022c 00000000 		.word	encoder_button
+ 512 0230 00000000 		.word	menu.12
+ 513 0234 00000000 		.word	set.10
+ 514 0238 00000000 		.word	enc_last.9
+ 515 023c 00000000 		.word	i.8
+ 516 0240 00000000 		.word	last_millis.11
+ 517 0244 00000000 		.word	preflow_time
+ 518 0248 D34D6210 		.word	274877907
+ 519 024c 18FCFFFF 		.word	-1000
+ 520 0250 1F85EB51 		.word	1374389535
+ 521 0254 00000000 		.word	.LC0
+ 522 0258 00000000 		.word	Font_16x26
+ 523 025c 00000000 		.word	Font_11x18
+ 524 0260 08000000 		.word	.LC1
+ 525 0264 10000000 		.word	.LC2
+ 526 0268 00000000 		.word	upslope_time
+ 527 026c 18000000 		.word	.LC3
+ 528              	.LVL38:
+ 529              	.L35:
+ 211:Core/Src/welder.c ****                 ssd1306_SetCursor(64-(16*a/2), 32);
+ 530              		.loc 1 211 60 discriminator 2 view .LVU142
+ 531              	.LBE7:
+ 212:Core/Src/welder.c ****                 ssd1306_WriteString(str, Font_16x26, 1);
+ 532              		.loc 1 212 17 is_stmt 1 view .LVU143
+ 212:Core/Src/welder.c ****                 ssd1306_WriteString(str, Font_16x26, 1);
+ 533              		.loc 1 212 37 is_stmt 0 view .LVU144
+ 534 0270 C0F10800 		rsb	r0, r0, #8
+ 535              	.LVL39:
+ 212:Core/Src/welder.c ****                 ssd1306_WriteString(str, Font_16x26, 1);
+ 536              		.loc 1 212 17 view .LVU145
+ 537 0274 C000     		lsls	r0, r0, #3
+ 538 0276 2021     		movs	r1, #32
+ 539 0278 00F0F800 		and	r0, r0, #248
+ 540 027c FFF7FEFF 		bl	ssd1306_SetCursor
+ 541              	.LVL40:
+ 213:Core/Src/welder.c **** 
+ 542              		.loc 1 213 17 is_stmt 1 view .LVU146
+ 543 0280 614B     		ldr	r3, .L40
+ 544 0282 0122     		movs	r2, #1
+ 545 0284 0092     		str	r2, [sp]
+ 546 0286 0ECB     		ldm	r3, {r1, r2, r3}
+ 547 0288 03A8     		add	r0, sp, #12
+ 548 028a FFF7FEFF 		bl	ssd1306_WriteString
+ 549              	.LVL41:
+ 215:Core/Src/welder.c ****                     if(enc_last < encoder_counter) upslope_time += (encoder_counter - enc_last)*50;
+ 550              		.loc 1 215 17 view .LVU147
+ 215:Core/Src/welder.c ****                     if(enc_last < encoder_counter) upslope_time += (encoder_counter - enc_last)*50;
+ 551              		.loc 1 215 29 is_stmt 0 view .LVU148
+ 552 028e 5F4B     		ldr	r3, .L40+4
+ 553 0290 B3F90030 		ldrsh	r3, [r3]
+ 215:Core/Src/welder.c ****                     if(enc_last < encoder_counter) upslope_time += (encoder_counter - enc_last)*50;
+ 554              		.loc 1 215 19 view .LVU149
+ 555 0294 B342     		cmp	r3, r6
+ 556 0296 13D0     		beq	.L22
+ 215:Core/Src/welder.c ****                     if(enc_last < encoder_counter) upslope_time += (encoder_counter - enc_last)*50;
+ 557              		.loc 1 215 48 discriminator 1 view .LVU150
+ 558 0298 15F0010F 		tst	r5, #1
+ARM GAS  /tmp/ccd93dhD.s 			page 18
+
+
+ 559 029c 10D1     		bne	.L22
+ 215:Core/Src/welder.c ****                     if(enc_last < encoder_counter) upslope_time += (encoder_counter - enc_last)*50;
+ 560              		.loc 1 215 76 discriminator 2 view .LVU151
+ 561 029e 5C4A     		ldr	r2, .L40+8
+ 562 02a0 1278     		ldrb	r2, [r2]	@ zero_extendqisi2
+ 563 02a2 6AB1     		cbz	r2, .L22
+ 216:Core/Src/welder.c ****                     else upslope_time -= (enc_last - encoder_counter)*50;
+ 564              		.loc 1 216 21 is_stmt 1 view .LVU152
+ 216:Core/Src/welder.c ****                     else upslope_time -= (enc_last - encoder_counter)*50;
+ 565              		.loc 1 216 23 is_stmt 0 view .LVU153
+ 566 02a4 B342     		cmp	r3, r6
+ 567 02a6 22DA     		bge	.L23
+ 216:Core/Src/welder.c ****                     else upslope_time -= (enc_last - encoder_counter)*50;
+ 568              		.loc 1 216 52 is_stmt 1 discriminator 1 view .LVU154
+ 216:Core/Src/welder.c ****                     else upslope_time -= (enc_last - encoder_counter)*50;
+ 569              		.loc 1 216 85 is_stmt 0 discriminator 1 view .LVU155
+ 570 02a8 F31A     		subs	r3, r6, r3
+ 216:Core/Src/welder.c ****                     else upslope_time -= (enc_last - encoder_counter)*50;
+ 571              		.loc 1 216 65 discriminator 1 view .LVU156
+ 572 02aa 5A49     		ldr	r1, .L40+12
+ 573 02ac 03EB8303 		add	r3, r3, r3, lsl #2
+ 574 02b0 03EB8303 		add	r3, r3, r3, lsl #2
+ 575 02b4 0A88     		ldrh	r2, [r1]
+ 576 02b6 02EB4303 		add	r3, r2, r3, lsl #1
+ 577 02ba 0B80     		strh	r3, [r1]	@ movhi
+ 578              	.L24:
+ 218:Core/Src/welder.c ****                 }        
+ 579              		.loc 1 218 21 is_stmt 1 view .LVU157
+ 218:Core/Src/welder.c ****                 }        
+ 580              		.loc 1 218 30 is_stmt 0 view .LVU158
+ 581 02bc 534B     		ldr	r3, .L40+4
+ 582 02be 1E80     		strh	r6, [r3]	@ movhi
+ 583              	.L22:
+ 220:Core/Src/welder.c ****                     // ssd1306_SetCursor(0, 32);
+ 584              		.loc 1 220 17 is_stmt 1 view .LVU159
+ 220:Core/Src/welder.c ****                     // ssd1306_SetCursor(0, 32);
+ 585              		.loc 1 220 20 is_stmt 0 view .LVU160
+ 586 02c0 FFF7FEFF 		bl	HAL_GetTick
+ 587              	.LVL42:
+ 220:Core/Src/welder.c ****                     // ssd1306_SetCursor(0, 32);
+ 588              		.loc 1 220 34 discriminator 1 view .LVU161
+ 589 02c4 544B     		ldr	r3, .L40+16
+ 590 02c6 1B68     		ldr	r3, [r3]
+ 591 02c8 C01A     		subs	r0, r0, r3
+ 220:Core/Src/welder.c ****                     // ssd1306_SetCursor(0, 32);
+ 592              		.loc 1 220 19 discriminator 1 view .LVU162
+ 593 02ca B0F5FA7F 		cmp	r0, #500
+ 594 02ce 02D3     		bcc	.L25
+ 220:Core/Src/welder.c ****                     // ssd1306_SetCursor(0, 32);
+ 595              		.loc 1 220 55 discriminator 1 view .LVU163
+ 596 02d0 4F4B     		ldr	r3, .L40+8
+ 597 02d2 1B78     		ldrb	r3, [r3]	@ zero_extendqisi2
+ 598 02d4 C3B9     		cbnz	r3, .L36
+ 599              	.L25:
+ 227:Core/Src/welder.c ****                     ssd1306_WriteString("Upslope", Font_11x18,1);
+ 600              		.loc 1 227 21 is_stmt 1 view .LVU164
+ 601 02d6 0021     		movs	r1, #0
+ARM GAS  /tmp/ccd93dhD.s 			page 19
+
+
+ 602 02d8 1920     		movs	r0, #25
+ 603 02da FFF7FEFF 		bl	ssd1306_SetCursor
+ 604              	.LVL43:
+ 228:Core/Src/welder.c ****                 }
+ 605              		.loc 1 228 21 view .LVU165
+ 606 02de 4F4B     		ldr	r3, .L40+20
+ 607 02e0 0122     		movs	r2, #1
+ 608 02e2 0092     		str	r2, [sp]
+ 609 02e4 0ECB     		ldm	r3, {r1, r2, r3}
+ 610 02e6 4E48     		ldr	r0, .L40+24
+ 611 02e8 FFF7FEFF 		bl	ssd1306_WriteString
+ 612              	.LVL44:
+ 613 02ec CAE6     		b	.L18
+ 614              	.L23:
+ 217:Core/Src/welder.c ****                     enc_last = encoder_counter;
+ 615              		.loc 1 217 26 view .LVU166
+ 217:Core/Src/welder.c ****                     enc_last = encoder_counter;
+ 616              		.loc 1 217 52 is_stmt 0 view .LVU167
+ 617 02ee 9B1B     		subs	r3, r3, r6
+ 217:Core/Src/welder.c ****                     enc_last = encoder_counter;
+ 618              		.loc 1 217 39 view .LVU168
+ 619 02f0 4849     		ldr	r1, .L40+12
+ 620 02f2 C3EB8322 		rsb	r2, r3, r3, lsl #10
+ 621 02f6 03EB8202 		add	r2, r3, r2, lsl #2
+ 622 02fa C3EBC203 		rsb	r3, r3, r2, lsl #3
+ 623 02fe 0A88     		ldrh	r2, [r1]
+ 624 0300 02EB4303 		add	r3, r2, r3, lsl #1
+ 625 0304 0B80     		strh	r3, [r1]	@ movhi
+ 626 0306 D9E7     		b	.L24
+ 627              	.L36:
+ 223:Core/Src/welder.c ****                     ssd1306_WriteString("Upslope", Font_11x18,0);
+ 628              		.loc 1 223 21 is_stmt 1 view .LVU169
+ 629 0308 0021     		movs	r1, #0
+ 630 030a 1920     		movs	r0, #25
+ 631 030c FFF7FEFF 		bl	ssd1306_SetCursor
+ 632              	.LVL45:
+ 224:Core/Src/welder.c ****                     if(HAL_GetTick() - last_millis >= 1000) last_millis = HAL_GetTick();
+ 633              		.loc 1 224 21 view .LVU170
+ 634 0310 424B     		ldr	r3, .L40+20
+ 635 0312 0022     		movs	r2, #0
+ 636 0314 0092     		str	r2, [sp]
+ 637 0316 0ECB     		ldm	r3, {r1, r2, r3}
+ 638 0318 4148     		ldr	r0, .L40+24
+ 639 031a FFF7FEFF 		bl	ssd1306_WriteString
+ 640              	.LVL46:
+ 225:Core/Src/welder.c ****                 }else{
+ 641              		.loc 1 225 21 view .LVU171
+ 225:Core/Src/welder.c ****                 }else{
+ 642              		.loc 1 225 24 is_stmt 0 view .LVU172
+ 643 031e FFF7FEFF 		bl	HAL_GetTick
+ 644              	.LVL47:
+ 225:Core/Src/welder.c ****                 }else{
+ 645              		.loc 1 225 38 discriminator 1 view .LVU173
+ 646 0322 3D4B     		ldr	r3, .L40+16
+ 647 0324 1B68     		ldr	r3, [r3]
+ 648 0326 C01A     		subs	r0, r0, r3
+ 225:Core/Src/welder.c ****                 }else{
+ARM GAS  /tmp/ccd93dhD.s 			page 20
+
+
+ 649              		.loc 1 225 23 discriminator 1 view .LVU174
+ 650 0328 B0F57A7F 		cmp	r0, #1000
+ 651 032c FFF4AAAE 		bcc	.L18
+ 225:Core/Src/welder.c ****                 }else{
+ 652              		.loc 1 225 61 is_stmt 1 discriminator 1 view .LVU175
+ 225:Core/Src/welder.c ****                 }else{
+ 653              		.loc 1 225 75 is_stmt 0 discriminator 1 view .LVU176
+ 654 0330 FFF7FEFF 		bl	HAL_GetTick
+ 655              	.LVL48:
+ 225:Core/Src/welder.c ****                 }else{
+ 656              		.loc 1 225 73 discriminator 1 view .LVU177
+ 657 0334 384B     		ldr	r3, .L40+16
+ 658 0336 1860     		str	r0, [r3]
+ 659 0338 A4E6     		b	.L18
+ 660              	.LVL49:
+ 661              	.L3:
+ 225:Core/Src/welder.c ****                 }else{
+ 662              		.loc 1 225 73 discriminator 1 view .LVU178
+ 663              	.LBE10:
+ 664              	.LBE11:
+ 665              	.LBB12:
+ 292:Core/Src/welder.c ****             snprintf(str,sizeof(str), "%dT", trigger_type);
+ 666              		.loc 1 292 13 is_stmt 1 view .LVU179
+ 667 033a 0021     		movs	r1, #0
+ 668 033c 0846     		mov	r0, r1
+ 669 033e FFF7FEFF 		bl	ssd1306_SetCursor
+ 670              	.LVL50:
+ 293:Core/Src/welder.c ****             ssd1306_WriteString(str, Font_11x18, 1);
+ 671              		.loc 1 293 13 view .LVU180
+ 672 0342 03AE     		add	r6, sp, #12
+ 673              	.LVL51:
+ 293:Core/Src/welder.c ****             ssd1306_WriteString(str, Font_11x18, 1);
+ 674              		.loc 1 293 13 is_stmt 0 view .LVU181
+ 675 0344 374B     		ldr	r3, .L40+28
+ 676 0346 1B78     		ldrb	r3, [r3]	@ zero_extendqisi2
+ 677 0348 374A     		ldr	r2, .L40+32
+ 678 034a 0A21     		movs	r1, #10
+ 679 034c 3046     		mov	r0, r6
+ 680 034e FFF7FEFF 		bl	snprintf
+ 681              	.LVL52:
+ 294:Core/Src/welder.c **** 
+ 682              		.loc 1 294 13 is_stmt 1 view .LVU182
+ 683 0352 324D     		ldr	r5, .L40+20
+ 684              	.LVL53:
+ 294:Core/Src/welder.c **** 
+ 685              		.loc 1 294 13 is_stmt 0 view .LVU183
+ 686 0354 4FF00108 		mov	r8, #1
+ 687 0358 CDF80080 		str	r8, [sp]
+ 688 035c 95E80E00 		ldm	r5, {r1, r2, r3}
+ 689 0360 3046     		mov	r0, r6
+ 690 0362 FFF7FEFF 		bl	ssd1306_WriteString
+ 691              	.LVL54:
+ 296:Core/Src/welder.c ****             snprintf(str,sizeof(str), mode_string[(welding_mode & 3) - 1]);
+ 692              		.loc 1 296 13 is_stmt 1 view .LVU184
+ 693 0366 0021     		movs	r1, #0
+ 694 0368 3520     		movs	r0, #53
+ 695 036a FFF7FEFF 		bl	ssd1306_SetCursor
+ARM GAS  /tmp/ccd93dhD.s 			page 21
+
+
+ 696              	.LVL55:
+ 297:Core/Src/welder.c ****             ssd1306_WriteString(str, Font_11x18, 1);
+ 697              		.loc 1 297 13 view .LVU185
+ 297:Core/Src/welder.c ****             ssd1306_WriteString(str, Font_11x18, 1);
+ 698              		.loc 1 297 65 is_stmt 0 view .LVU186
+ 699 036e 2F4F     		ldr	r7, .L40+36
+ 700 0370 3B78     		ldrb	r3, [r7]	@ zero_extendqisi2
+ 701 0372 03F00303 		and	r3, r3, #3
+ 297:Core/Src/welder.c ****             ssd1306_WriteString(str, Font_11x18, 1);
+ 702              		.loc 1 297 70 view .LVU187
+ 703 0376 013B     		subs	r3, r3, #1
+ 297:Core/Src/welder.c ****             ssd1306_WriteString(str, Font_11x18, 1);
+ 704              		.loc 1 297 13 view .LVU188
+ 705 0378 2D4A     		ldr	r2, .L40+40
+ 706 037a 52F82320 		ldr	r2, [r2, r3, lsl #2]
+ 707 037e 0A21     		movs	r1, #10
+ 708 0380 3046     		mov	r0, r6
+ 709 0382 FFF7FEFF 		bl	snprintf
+ 710              	.LVL56:
+ 298:Core/Src/welder.c **** 
+ 711              		.loc 1 298 13 is_stmt 1 view .LVU189
+ 712 0386 CDF80080 		str	r8, [sp]
+ 713 038a 95E80E00 		ldm	r5, {r1, r2, r3}
+ 714 038e 3046     		mov	r0, r6
+ 715 0390 FFF7FEFF 		bl	ssd1306_WriteString
+ 716              	.LVL57:
+ 300:Core/Src/welder.c ****                 ssd1306_SetCursor(128-(11*3),0);
+ 717              		.loc 1 300 13 view .LVU190
+ 300:Core/Src/welder.c ****                 ssd1306_SetCursor(128-(11*3),0);
+ 718              		.loc 1 300 29 is_stmt 0 view .LVU191
+ 719 0394 3B78     		ldrb	r3, [r7]	@ zero_extendqisi2
+ 300:Core/Src/welder.c ****                 ssd1306_SetCursor(128-(11*3),0);
+ 720              		.loc 1 300 15 view .LVU192
+ 721 0396 13F0040F 		tst	r3, #4
+ 722 039a 08D1     		bne	.L37
+ 723              	.L27:
+ 306:Core/Src/welder.c ****             int b = adc_buffer[0];
+ 724              		.loc 1 306 13 is_stmt 1 view .LVU193
+ 306:Core/Src/welder.c ****             int b = adc_buffer[0];
+ 725              		.loc 1 306 60 is_stmt 0 view .LVU194
+ 726 039c 254D     		ldr	r5, .L40+44
+ 306:Core/Src/welder.c ****             int b = adc_buffer[0];
+ 727              		.loc 1 306 13 view .LVU195
+ 728 039e 2B68     		ldr	r3, [r5]
+ 729 03a0 254A     		ldr	r2, .L40+48
+ 730 03a2 0A21     		movs	r1, #10
+ 731 03a4 03A8     		add	r0, sp, #12
+ 732 03a6 FFF7FEFF 		bl	snprintf
+ 733              	.LVL58:
+ 307:Core/Src/welder.c ****             uint8_t a = 0;
+ 734              		.loc 1 307 13 is_stmt 1 view .LVU196
+ 307:Core/Src/welder.c ****             uint8_t a = 0;
+ 735              		.loc 1 307 31 is_stmt 0 view .LVU197
+ 736 03aa 2B68     		ldr	r3, [r5]
+ 737              	.LVL59:
+ 308:Core/Src/welder.c ****             while(b > 0) {a++; b /= 10;};
+ 738              		.loc 1 308 13 is_stmt 1 view .LVU198
+ARM GAS  /tmp/ccd93dhD.s 			page 22
+
+
+ 309:Core/Src/welder.c ****             ssd1306_SetCursor(64-(16*a/2), 48 - (26/2));
+ 739              		.loc 1 309 13 view .LVU199
+ 309:Core/Src/welder.c ****             ssd1306_SetCursor(64-(16*a/2), 48 - (26/2));
+ 740              		.loc 1 309 18 is_stmt 0 view .LVU200
+ 741 03ac 19E0     		b	.L28
+ 742              	.LVL60:
+ 743              	.L37:
+ 301:Core/Src/welder.c ****                 snprintf(str,sizeof(str), mode_string[2]);
+ 744              		.loc 1 301 17 is_stmt 1 view .LVU201
+ 745 03ae 0021     		movs	r1, #0
+ 746 03b0 5F20     		movs	r0, #95
+ 747 03b2 FFF7FEFF 		bl	ssd1306_SetCursor
+ 748              	.LVL61:
+ 302:Core/Src/welder.c ****                 ssd1306_WriteString(str, Font_11x18, 1);
+ 749              		.loc 1 302 17 view .LVU202
+ 750 03b6 1E4B     		ldr	r3, .L40+40
+ 751 03b8 9A68     		ldr	r2, [r3, #8]
+ 752 03ba 0A21     		movs	r1, #10
+ 753 03bc 3046     		mov	r0, r6
+ 754 03be FFF7FEFF 		bl	snprintf
+ 755              	.LVL62:
+ 303:Core/Src/welder.c ****             }
+ 756              		.loc 1 303 17 view .LVU203
+ 757 03c2 164B     		ldr	r3, .L40+20
+ 758 03c4 CDF80080 		str	r8, [sp]
+ 759 03c8 0ECB     		ldm	r3, {r1, r2, r3}
+ 760 03ca 3046     		mov	r0, r6
+ 761 03cc FFF7FEFF 		bl	ssd1306_WriteString
+ 762              	.LVL63:
+ 763 03d0 E4E7     		b	.L27
+ 764              	.LVL64:
+ 765              	.L29:
+ 309:Core/Src/welder.c ****             ssd1306_SetCursor(64-(16*a/2), 48 - (26/2));
+ 766              		.loc 1 309 27 discriminator 2 view .LVU204
+ 309:Core/Src/welder.c ****             ssd1306_SetCursor(64-(16*a/2), 48 - (26/2));
+ 767              		.loc 1 309 28 is_stmt 0 discriminator 2 view .LVU205
+ 768 03d2 0134     		adds	r4, r4, #1
+ 769              	.LVL65:
+ 309:Core/Src/welder.c ****             ssd1306_SetCursor(64-(16*a/2), 48 - (26/2));
+ 770              		.loc 1 309 28 discriminator 2 view .LVU206
+ 771 03d4 E4B2     		uxtb	r4, r4
+ 772              	.LVL66:
+ 309:Core/Src/welder.c ****             ssd1306_SetCursor(64-(16*a/2), 48 - (26/2));
+ 773              		.loc 1 309 32 is_stmt 1 discriminator 2 view .LVU207
+ 309:Core/Src/welder.c ****             ssd1306_SetCursor(64-(16*a/2), 48 - (26/2));
+ 774              		.loc 1 309 34 is_stmt 0 discriminator 2 view .LVU208
+ 775 03d6 194A     		ldr	r2, .L40+52
+ 776 03d8 82FB0312 		smull	r1, r2, r2, r3
+ 777 03dc DB17     		asrs	r3, r3, #31
+ 778              	.LVL67:
+ 309:Core/Src/welder.c ****             ssd1306_SetCursor(64-(16*a/2), 48 - (26/2));
+ 779              		.loc 1 309 34 discriminator 2 view .LVU209
+ 780 03de C3EBA203 		rsb	r3, r3, r2, asr #2
+ 781              	.LVL68:
+ 782              	.L28:
+ 309:Core/Src/welder.c ****             ssd1306_SetCursor(64-(16*a/2), 48 - (26/2));
+ 783              		.loc 1 309 21 is_stmt 1 discriminator 1 view .LVU210
+ARM GAS  /tmp/ccd93dhD.s 			page 23
+
+
+ 784 03e2 002B     		cmp	r3, #0
+ 785 03e4 F5DC     		bgt	.L29
+ 309:Core/Src/welder.c ****             ssd1306_SetCursor(64-(16*a/2), 48 - (26/2));
+ 786              		.loc 1 309 41 discriminator 3 view .LVU211
+ 310:Core/Src/welder.c ****             ssd1306_WriteString(str, Font_16x26, 1);
+ 787              		.loc 1 310 13 view .LVU212
+ 310:Core/Src/welder.c ****             ssd1306_WriteString(str, Font_16x26, 1);
+ 788              		.loc 1 310 33 is_stmt 0 view .LVU213
+ 789 03e6 C4F10800 		rsb	r0, r4, #8
+ 310:Core/Src/welder.c ****             ssd1306_WriteString(str, Font_16x26, 1);
+ 790              		.loc 1 310 13 view .LVU214
+ 791 03ea C000     		lsls	r0, r0, #3
+ 792 03ec 2321     		movs	r1, #35
+ 793 03ee 00F0F800 		and	r0, r0, #248
+ 794 03f2 FFF7FEFF 		bl	ssd1306_SetCursor
+ 795              	.LVL69:
+ 311:Core/Src/welder.c ****         }
+ 796              		.loc 1 311 13 is_stmt 1 view .LVU215
+ 797 03f6 044B     		ldr	r3, .L40
+ 798 03f8 0122     		movs	r2, #1
+ 799 03fa 0092     		str	r2, [sp]
+ 800 03fc 0ECB     		ldm	r3, {r1, r2, r3}
+ 801 03fe 03A8     		add	r0, sp, #12
+ 802 0400 FFF7FEFF 		bl	ssd1306_WriteString
+ 803              	.LVL70:
+ 804 0404 4DE6     		b	.L26
+ 805              	.L41:
+ 806 0406 00BF     		.align	2
+ 807              	.L40:
+ 808 0408 00000000 		.word	Font_16x26
+ 809 040c 00000000 		.word	enc_last.9
+ 810 0410 00000000 		.word	set.10
+ 811 0414 00000000 		.word	upslope_time
+ 812 0418 00000000 		.word	last_millis.11
+ 813 041c 00000000 		.word	Font_11x18
+ 814 0420 10000000 		.word	.LC2
+ 815 0424 00000000 		.word	trigger_type
+ 816 0428 20000000 		.word	.LC4
+ 817 042c 00000000 		.word	welding_mode
+ 818 0430 00000000 		.word	mode_string
+ 819 0434 00000000 		.word	adc_buffer
+ 820 0438 24000000 		.word	.LC5
+ 821 043c 67666666 		.word	1717986919
+ 822              	.LBE12:
+ 823              		.cfi_endproc
+ 824              	.LFE224:
+ 826              		.section	.text.set_current,"ax",%progbits
+ 827              		.align	1
+ 828              		.global	set_current
+ 829              		.syntax unified
+ 830              		.thumb
+ 831              		.thumb_func
+ 833              	set_current:
+ 834              	.LVL71:
+ 835              	.LFB227:
+ 316:Core/Src/welder.c **** 
+ 317:Core/Src/welder.c **** void state_machine()    // Basic state machine for welding processes
+ARM GAS  /tmp/ccd93dhD.s 			page 24
+
+
+ 318:Core/Src/welder.c **** {
+ 319:Core/Src/welder.c ****     idle_menu();
+ 320:Core/Src/welder.c ****     uint16_t set_curr;
+ 321:Core/Src/welder.c ****     switch (state)
+ 322:Core/Src/welder.c ****     {
+ 323:Core/Src/welder.c ****     case idle:
+ 324:Core/Src/welder.c ****         if(start_condition()){
+ 325:Core/Src/welder.c ****             state++;
+ 326:Core/Src/welder.c ****         }
+ 327:Core/Src/welder.c ****         HAL_GPIO_WritePin(GAS_GPIO_Port, GAS_Pin, GPIO_PIN_RESET);  // Close gas at idle
+ 328:Core/Src/welder.c ****         HAL_GPIO_WritePin(IGNITION_GPIO_Port, IGNITION_Pin, GPIO_PIN_RESET);    // Disable igniter
+ 329:Core/Src/welder.c ****         set_current(0);                                             // Set current to 0
+ 330:Core/Src/welder.c ****         break;
+ 331:Core/Src/welder.c ****     case preflow:   
+ 332:Core/Src/welder.c ****         if(stop_condition()){
+ 333:Core/Src/welder.c ****             NB_Delay(0,1); // Reset non blocking delay
+ 334:Core/Src/welder.c ****             state = idle;
+ 335:Core/Src/welder.c ****             break;
+ 336:Core/Src/welder.c ****         }
+ 337:Core/Src/welder.c ****         HAL_GPIO_WritePin(GAS_GPIO_Port, GAS_Pin, GPIO_PIN_SET);
+ 338:Core/Src/welder.c ****         if(welding_mode & AC){
+ 339:Core/Src/welder.c ****             set_pwm_frequency(ac_frequency);
+ 340:Core/Src/welder.c ****             set_pwm_duty(ac_duty);
+ 341:Core/Src/welder.c ****         } else{
+ 342:Core/Src/welder.c ****             set_pwm_duty(0);        // Setting this to 0 causes the pwm pin to be constant value
+ 343:Core/Src/welder.c ****         }
+ 344:Core/Src/welder.c ****         if(NB_Delay(preflow_time,0))  // open argon and after delay go to next state
+ 345:Core/Src/welder.c ****             state++;
+ 346:Core/Src/welder.c ****         break;
+ 347:Core/Src/welder.c ****     case ignition:
+ 348:Core/Src/welder.c ****         if(stop_condition()){
+ 349:Core/Src/welder.c ****             NB_Delay(0,1);
+ 350:Core/Src/welder.c ****             state = idle;
+ 351:Core/Src/welder.c ****             break;
+ 352:Core/Src/welder.c ****         }
+ 353:Core/Src/welder.c ****         HAL_GPIO_WritePin(IGNITION_GPIO_Port, IGNITION_Pin, GPIO_PIN_SET);    // Enable igniter
+ 354:Core/Src/welder.c ****         set_current(ignition_current);                // Set low ignition current
+ 355:Core/Src/welder.c ****         if(NB_Delay(ignition_timeout,0)){
+ 356:Core/Src/welder.c ****             if(adc_buffer[1] >= current_threshold){
+ 357:Core/Src/welder.c ****                 state++;
+ 358:Core/Src/welder.c ****             } else
+ 359:Core/Src/welder.c ****                 state = idle;
+ 360:Core/Src/welder.c ****         }
+ 361:Core/Src/welder.c ****         break;
+ 362:Core/Src/welder.c ****     case upslope:
+ 363:Core/Src/welder.c ****         if(stop_condition()){
+ 364:Core/Src/welder.c ****             NB_Delay(0,1);
+ 365:Core/Src/welder.c ****             LinearTransition(0,0,0,1);
+ 366:Core/Src/welder.c ****             state = crater;
+ 367:Core/Src/welder.c ****             break;
+ 368:Core/Src/welder.c ****         }
+ 369:Core/Src/welder.c ****         set_curr = LinearTransition(start_current, base_current, upslope_time, 0);
+ 370:Core/Src/welder.c ****         set_current(set_curr);
+ 371:Core/Src/welder.c ****         if(set_curr == base_current)
+ 372:Core/Src/welder.c ****             state++;
+ 373:Core/Src/welder.c ****         break;
+ 374:Core/Src/welder.c ****     case welding:
+ARM GAS  /tmp/ccd93dhD.s 			page 25
+
+
+ 375:Core/Src/welder.c ****         if(stop_condition()){
+ 376:Core/Src/welder.c ****             state = downslope;
+ 377:Core/Src/welder.c ****         }
+ 378:Core/Src/welder.c ****         weld();
+ 379:Core/Src/welder.c ****         break;
+ 380:Core/Src/welder.c ****     case downslope:
+ 381:Core/Src/welder.c ****         if(start_condition()){
+ 382:Core/Src/welder.c ****             LinearTransition(0,0,0,1);
+ 383:Core/Src/welder.c ****             state = welding;
+ 384:Core/Src/welder.c ****             break;
+ 385:Core/Src/welder.c ****         }
+ 386:Core/Src/welder.c ****         // Begin to gradually lower the current
+ 387:Core/Src/welder.c ****         set_curr = LinearTransition(base_current, crater_current, downslope_time, 0);
+ 388:Core/Src/welder.c ****         set_current(set_curr);
+ 389:Core/Src/welder.c ****         if(set_curr == crater_current)
+ 390:Core/Src/welder.c ****             state++;
+ 391:Core/Src/welder.c ****         break;
+ 392:Core/Src/welder.c ****     case crater:
+ 393:Core/Src/welder.c ****         if(start_condition()){
+ 394:Core/Src/welder.c ****             NB_Delay(0,1);
+ 395:Core/Src/welder.c ****             state = upslope;
+ 396:Core/Src/welder.c ****             break;
+ 397:Core/Src/welder.c ****         }
+ 398:Core/Src/welder.c ****         if(NB_Delay(crater_time,0))
+ 399:Core/Src/welder.c ****             state ++;
+ 400:Core/Src/welder.c ****         break;
+ 401:Core/Src/welder.c ****     case postflow:
+ 402:Core/Src/welder.c ****         if(start_condition()){
+ 403:Core/Src/welder.c ****             NB_Delay(0,1);
+ 404:Core/Src/welder.c ****             state = ignition;
+ 405:Core/Src/welder.c ****             break;
+ 406:Core/Src/welder.c ****         }
+ 407:Core/Src/welder.c ****         set_current(0);             // Extinguish the arc
+ 408:Core/Src/welder.c ****         if(NB_Delay(postflow_time,0))
+ 409:Core/Src/welder.c ****             state = idle;
+ 410:Core/Src/welder.c ****         break;
+ 411:Core/Src/welder.c ****     
+ 412:Core/Src/welder.c **** 
+ 413:Core/Src/welder.c ****     default:    // Failsafe
+ 414:Core/Src/welder.c ****         state = idle;
+ 415:Core/Src/welder.c ****         break;
+ 416:Core/Src/welder.c ****     }
+ 417:Core/Src/welder.c **** }
+ 418:Core/Src/welder.c **** 
+ 419:Core/Src/welder.c **** void weld(){
+ 420:Core/Src/welder.c ****     static uint16_t set_curr = 0;
+ 421:Core/Src/welder.c ****     static uint32_t prev_millis = 0;
+ 422:Core/Src/welder.c **** 
+ 423:Core/Src/welder.c ****     set_curr = base_current;
+ 424:Core/Src/welder.c **** 
+ 425:Core/Src/welder.c ****     if(welding_mode & Pulse){
+ 426:Core/Src/welder.c ****         float period = 1000.0/pulse_frequency;
+ 427:Core/Src/welder.c ****         if(HAL_GetTick() - prev_millis >= (uint32_t)period){
+ 428:Core/Src/welder.c ****             prev_millis = HAL_GetTick();
+ 429:Core/Src/welder.c ****             set_curr = base_current;
+ 430:Core/Src/welder.c ****         } else if(HAL_GetTick() - prev_millis >= (uint16_t)(((float)pulse_duty/100.0)*period)){
+ 431:Core/Src/welder.c ****             set_curr = background_current;
+ARM GAS  /tmp/ccd93dhD.s 			page 26
+
+
+ 432:Core/Src/welder.c ****         }
+ 433:Core/Src/welder.c ****     }
+ 434:Core/Src/welder.c **** 
+ 435:Core/Src/welder.c ****     if(pedal_connected && trigger_type == _4T){
+ 436:Core/Src/welder.c ****         set_curr = set_curr * (float)adc_buffer[0]/4095.0;
+ 437:Core/Src/welder.c ****     }
+ 438:Core/Src/welder.c ****     set_current(set_curr);
+ 439:Core/Src/welder.c **** }
+ 440:Core/Src/welder.c **** 
+ 441:Core/Src/welder.c **** void set_current(uint8_t current){
+ 836              		.loc 1 441 34 view -0
+ 837              		.cfi_startproc
+ 838              		@ args = 0, pretend = 0, frame = 0
+ 839              		@ frame_needed = 0, uses_anonymous_args = 0
+ 840              		.loc 1 441 34 is_stmt 0 view .LVU217
+ 841 0000 38B5     		push	{r3, r4, r5, lr}
+ 842              		.cfi_def_cfa_offset 16
+ 843              		.cfi_offset 3, -16
+ 844              		.cfi_offset 4, -12
+ 845              		.cfi_offset 5, -8
+ 846              		.cfi_offset 14, -4
+ 442:Core/Src/welder.c ****     if(current > max_current) current = max_current;
+ 847              		.loc 1 442 5 is_stmt 1 view .LVU218
+ 848              		.loc 1 442 7 is_stmt 0 view .LVU219
+ 849 0002 C828     		cmp	r0, #200
+ 850 0004 15D8     		bhi	.L45
+ 851 0006 0446     		mov	r4, r0
+ 443:Core/Src/welder.c ****     
+ 444:Core/Src/welder.c ****     if (current == 0){
+ 852              		.loc 1 444 5 is_stmt 1 view .LVU220
+ 853              		.loc 1 444 8 is_stmt 0 view .LVU221
+ 854 0008 70B1     		cbz	r0, .L47
+ 855              	.L43:
+ 856              	.LVL72:
+ 857              	.LBB13:
+ 445:Core/Src/welder.c ****         HAL_TIM_PWM_Stop_IT(&htim10, TIM_CHANNEL_1);
+ 446:Core/Src/welder.c ****     }else{
+ 447:Core/Src/welder.c ****         HAL_TIM_PWM_Start_IT(&htim10, TIM_CHANNEL_1);
+ 858              		.loc 1 447 9 is_stmt 1 view .LVU222
+ 859 000a 0B4D     		ldr	r5, .L48
+ 860 000c 0021     		movs	r1, #0
+ 861 000e 2846     		mov	r0, r5
+ 862 0010 FFF7FEFF 		bl	HAL_TIM_PWM_Start_IT
+ 863              	.LVL73:
+ 448:Core/Src/welder.c ****         uint32_t pwm_period = __HAL_TIM_GET_AUTORELOAD(&htim10);
+ 864              		.loc 1 448 9 view .LVU223
+ 865              		.loc 1 448 31 is_stmt 0 view .LVU224
+ 866 0014 2B68     		ldr	r3, [r5]
+ 867              		.loc 1 448 18 view .LVU225
+ 868 0016 DA6A     		ldr	r2, [r3, #44]
+ 869              	.LVL74:
+ 449:Core/Src/welder.c ****         uint32_t pwm_compare = (current * pwm_period) / max_current;
+ 870              		.loc 1 449 9 is_stmt 1 view .LVU226
+ 871              		.loc 1 449 41 is_stmt 0 view .LVU227
+ 872 0018 02FB04F4 		mul	r4, r2, r4
+ 873              		.loc 1 449 18 view .LVU228
+ 874 001c 074A     		ldr	r2, .L48+4
+ARM GAS  /tmp/ccd93dhD.s 			page 27
+
+
+ 875              	.LVL75:
+ 876              		.loc 1 449 18 view .LVU229
+ 877 001e A2FB0424 		umull	r2, r4, r2, r4
+ 878 0022 A409     		lsrs	r4, r4, #6
+ 879              	.LVL76:
+ 450:Core/Src/welder.c ****     __HAL_TIM_SET_COMPARE(&htim10, TIM_CHANNEL_1, pwm_compare);
+ 880              		.loc 1 450 5 is_stmt 1 view .LVU230
+ 881 0024 5C63     		str	r4, [r3, #52]
+ 882              	.LVL77:
+ 883              	.L42:
+ 884              		.loc 1 450 5 is_stmt 0 view .LVU231
+ 885              	.LBE13:
+ 451:Core/Src/welder.c ****     }
+ 452:Core/Src/welder.c **** }
+ 886              		.loc 1 452 1 view .LVU232
+ 887 0026 38BD     		pop	{r3, r4, r5, pc}
+ 888              	.LVL78:
+ 889              	.L47:
+ 445:Core/Src/welder.c ****     }else{
+ 890              		.loc 1 445 9 is_stmt 1 view .LVU233
+ 891 0028 0021     		movs	r1, #0
+ 892 002a 0348     		ldr	r0, .L48
+ 893              	.LVL79:
+ 445:Core/Src/welder.c ****     }else{
+ 894              		.loc 1 445 9 is_stmt 0 view .LVU234
+ 895 002c FFF7FEFF 		bl	HAL_TIM_PWM_Stop_IT
+ 896              	.LVL80:
+ 897 0030 F9E7     		b	.L42
+ 898              	.LVL81:
+ 899              	.L45:
+ 442:Core/Src/welder.c ****     
+ 900              		.loc 1 442 39 discriminator 1 view .LVU235
+ 901 0032 C824     		movs	r4, #200
+ 902 0034 E9E7     		b	.L43
+ 903              	.L49:
+ 904 0036 00BF     		.align	2
+ 905              	.L48:
+ 906 0038 00000000 		.word	htim10
+ 907 003c 1F85EB51 		.word	1374389535
+ 908              		.cfi_endproc
+ 909              	.LFE227:
+ 911              		.section	.text.weld,"ax",%progbits
+ 912              		.align	1
+ 913              		.global	weld
+ 914              		.syntax unified
+ 915              		.thumb
+ 916              		.thumb_func
+ 918              	weld:
+ 919              	.LFB226:
+ 419:Core/Src/welder.c ****     static uint16_t set_curr = 0;
+ 920              		.loc 1 419 12 is_stmt 1 view -0
+ 921              		.cfi_startproc
+ 922              		@ args = 0, pretend = 0, frame = 0
+ 923              		@ frame_needed = 0, uses_anonymous_args = 0
+ 924 0000 D0B5     		push	{r4, r6, r7, lr}
+ 925              		.cfi_def_cfa_offset 16
+ 926              		.cfi_offset 4, -16
+ARM GAS  /tmp/ccd93dhD.s 			page 28
+
+
+ 927              		.cfi_offset 6, -12
+ 928              		.cfi_offset 7, -8
+ 929              		.cfi_offset 14, -4
+ 930 0002 2DED028B 		vpush.64	{d8}
+ 931              		.cfi_def_cfa_offset 24
+ 932              		.cfi_offset 80, -24
+ 933              		.cfi_offset 81, -20
+ 420:Core/Src/welder.c ****     static uint32_t prev_millis = 0;
+ 934              		.loc 1 420 5 view .LVU237
+ 421:Core/Src/welder.c **** 
+ 935              		.loc 1 421 5 view .LVU238
+ 423:Core/Src/welder.c **** 
+ 936              		.loc 1 423 5 view .LVU239
+ 423:Core/Src/welder.c **** 
+ 937              		.loc 1 423 14 is_stmt 0 view .LVU240
+ 938 0006 3C4B     		ldr	r3, .L57+8
+ 939 0008 1A78     		ldrb	r2, [r3]	@ zero_extendqisi2
+ 940 000a 3C4B     		ldr	r3, .L57+12
+ 941 000c 1A80     		strh	r2, [r3]	@ movhi
+ 425:Core/Src/welder.c ****         float period = 1000.0/pulse_frequency;
+ 942              		.loc 1 425 5 is_stmt 1 view .LVU241
+ 425:Core/Src/welder.c ****         float period = 1000.0/pulse_frequency;
+ 943              		.loc 1 425 21 is_stmt 0 view .LVU242
+ 944 000e 3C4B     		ldr	r3, .L57+16
+ 945 0010 1B78     		ldrb	r3, [r3]	@ zero_extendqisi2
+ 425:Core/Src/welder.c ****         float period = 1000.0/pulse_frequency;
+ 946              		.loc 1 425 7 view .LVU243
+ 947 0012 13F0040F 		tst	r3, #4
+ 948 0016 0DD1     		bne	.L55
+ 949              	.L51:
+ 435:Core/Src/welder.c ****         set_curr = set_curr * (float)adc_buffer[0]/4095.0;
+ 950              		.loc 1 435 5 is_stmt 1 view .LVU244
+ 435:Core/Src/welder.c ****         set_curr = set_curr * (float)adc_buffer[0]/4095.0;
+ 951              		.loc 1 435 8 is_stmt 0 view .LVU245
+ 952 0018 3A4B     		ldr	r3, .L57+20
+ 953 001a 1B78     		ldrb	r3, [r3]	@ zero_extendqisi2
+ 435:Core/Src/welder.c ****         set_curr = set_curr * (float)adc_buffer[0]/4095.0;
+ 954              		.loc 1 435 7 view .LVU246
+ 955 001c 1BB1     		cbz	r3, .L53
+ 435:Core/Src/welder.c ****         set_curr = set_curr * (float)adc_buffer[0]/4095.0;
+ 956              		.loc 1 435 40 discriminator 1 view .LVU247
+ 957 001e 3A4B     		ldr	r3, .L57+24
+ 958 0020 1B78     		ldrb	r3, [r3]	@ zero_extendqisi2
+ 435:Core/Src/welder.c ****         set_curr = set_curr * (float)adc_buffer[0]/4095.0;
+ 959              		.loc 1 435 24 discriminator 1 view .LVU248
+ 960 0022 042B     		cmp	r3, #4
+ 961 0024 48D0     		beq	.L56
+ 962              	.L53:
+ 438:Core/Src/welder.c **** }
+ 963              		.loc 1 438 5 is_stmt 1 view .LVU249
+ 964 0026 354B     		ldr	r3, .L57+12
+ 965 0028 1878     		ldrb	r0, [r3]	@ zero_extendqisi2
+ 966 002a FFF7FEFF 		bl	set_current
+ 967              	.LVL82:
+ 439:Core/Src/welder.c **** 
+ 968              		.loc 1 439 1 is_stmt 0 view .LVU250
+ 969 002e BDEC028B 		vldm	sp!, {d8}
+ARM GAS  /tmp/ccd93dhD.s 			page 29
+
+
+ 970              		.cfi_remember_state
+ 971              		.cfi_restore 80
+ 972              		.cfi_restore 81
+ 973              		.cfi_def_cfa_offset 16
+ 974 0032 D0BD     		pop	{r4, r6, r7, pc}
+ 975              	.L55:
+ 976              		.cfi_restore_state
+ 977              	.LBB14:
+ 426:Core/Src/welder.c ****         if(HAL_GetTick() - prev_millis >= (uint32_t)period){
+ 978              		.loc 1 426 9 is_stmt 1 view .LVU251
+ 426:Core/Src/welder.c ****         if(HAL_GetTick() - prev_millis >= (uint32_t)period){
+ 979              		.loc 1 426 30 is_stmt 0 view .LVU252
+ 980 0034 354B     		ldr	r3, .L57+28
+ 981 0036 D3ED007A 		vldr.32	s15, [r3]
+ 426:Core/Src/welder.c ****         if(HAL_GetTick() - prev_millis >= (uint32_t)period){
+ 982              		.loc 1 426 15 view .LVU253
+ 983 003a 9FED357A 		vldr.32	s14, .L57+32
+ 984 003e 87EE278A 		vdiv.f32	s16, s14, s15
+ 985              	.LVL83:
+ 427:Core/Src/welder.c ****             prev_millis = HAL_GetTick();
+ 986              		.loc 1 427 9 is_stmt 1 view .LVU254
+ 427:Core/Src/welder.c ****             prev_millis = HAL_GetTick();
+ 987              		.loc 1 427 12 is_stmt 0 view .LVU255
+ 988 0042 FFF7FEFF 		bl	HAL_GetTick
+ 989              	.LVL84:
+ 427:Core/Src/welder.c ****             prev_millis = HAL_GetTick();
+ 990              		.loc 1 427 26 discriminator 1 view .LVU256
+ 991 0046 334B     		ldr	r3, .L57+36
+ 992 0048 1B68     		ldr	r3, [r3]
+ 993 004a C01A     		subs	r0, r0, r3
+ 427:Core/Src/welder.c ****             prev_millis = HAL_GetTick();
+ 994              		.loc 1 427 43 discriminator 1 view .LVU257
+ 995 004c FCEEC87A 		vcvt.u32.f32	s15, s16
+ 996 0050 17EE903A 		vmov	r3, s15	@ int
+ 427:Core/Src/welder.c ****             prev_millis = HAL_GetTick();
+ 997              		.loc 1 427 11 discriminator 1 view .LVU258
+ 998 0054 9842     		cmp	r0, r3
+ 999 0056 08D3     		bcc	.L52
+ 428:Core/Src/welder.c ****             set_curr = base_current;
+ 1000              		.loc 1 428 13 is_stmt 1 view .LVU259
+ 428:Core/Src/welder.c ****             set_curr = base_current;
+ 1001              		.loc 1 428 27 is_stmt 0 view .LVU260
+ 1002 0058 FFF7FEFF 		bl	HAL_GetTick
+ 1003              	.LVL85:
+ 428:Core/Src/welder.c ****             set_curr = base_current;
+ 1004              		.loc 1 428 25 discriminator 1 view .LVU261
+ 1005 005c 2D4B     		ldr	r3, .L57+36
+ 1006 005e 1860     		str	r0, [r3]
+ 429:Core/Src/welder.c ****         } else if(HAL_GetTick() - prev_millis >= (uint16_t)(((float)pulse_duty/100.0)*period)){
+ 1007              		.loc 1 429 13 is_stmt 1 view .LVU262
+ 429:Core/Src/welder.c ****         } else if(HAL_GetTick() - prev_millis >= (uint16_t)(((float)pulse_duty/100.0)*period)){
+ 1008              		.loc 1 429 22 is_stmt 0 view .LVU263
+ 1009 0060 254B     		ldr	r3, .L57+8
+ 1010 0062 1A78     		ldrb	r2, [r3]	@ zero_extendqisi2
+ 1011 0064 254B     		ldr	r3, .L57+12
+ 1012 0066 1A80     		strh	r2, [r3]	@ movhi
+ 1013 0068 D6E7     		b	.L51
+ARM GAS  /tmp/ccd93dhD.s 			page 30
+
+
+ 1014              	.L52:
+ 430:Core/Src/welder.c ****             set_curr = background_current;
+ 1015              		.loc 1 430 16 is_stmt 1 view .LVU264
+ 430:Core/Src/welder.c ****             set_curr = background_current;
+ 1016              		.loc 1 430 19 is_stmt 0 view .LVU265
+ 1017 006a FFF7FEFF 		bl	HAL_GetTick
+ 1018              	.LVL86:
+ 430:Core/Src/welder.c ****             set_curr = background_current;
+ 1019              		.loc 1 430 33 discriminator 1 view .LVU266
+ 1020 006e 294B     		ldr	r3, .L57+36
+ 1021 0070 1C68     		ldr	r4, [r3]
+ 1022 0072 041B     		subs	r4, r0, r4
+ 430:Core/Src/welder.c ****             set_curr = background_current;
+ 1023              		.loc 1 430 62 discriminator 1 view .LVU267
+ 1024 0074 284B     		ldr	r3, .L57+40
+ 1025 0076 1878     		ldrb	r0, [r3]	@ zero_extendqisi2
+ 1026 0078 07EE900A 		vmov	s15, r0	@ int
+ 1027 007c F8EE677A 		vcvt.f32.u32	s15, s15
+ 1028 0080 17EE900A 		vmov	r0, s15
+ 1029 0084 FFF7FEFF 		bl	__aeabi_f2d
+ 1030              	.LVL87:
+ 430:Core/Src/welder.c ****             set_curr = background_current;
+ 1031              		.loc 1 430 79 discriminator 1 view .LVU268
+ 1032 0088 0022     		movs	r2, #0
+ 1033 008a 244B     		ldr	r3, .L57+44
+ 1034 008c FFF7FEFF 		bl	__aeabi_ddiv
+ 1035              	.LVL88:
+ 1036 0090 0646     		mov	r6, r0
+ 1037 0092 0F46     		mov	r7, r1
+ 430:Core/Src/welder.c ****             set_curr = background_current;
+ 1038              		.loc 1 430 86 discriminator 1 view .LVU269
+ 1039 0094 18EE100A 		vmov	r0, s16
+ 1040 0098 FFF7FEFF 		bl	__aeabi_f2d
+ 1041              	.LVL89:
+ 1042 009c 3246     		mov	r2, r6
+ 1043 009e 3B46     		mov	r3, r7
+ 1044 00a0 FFF7FEFF 		bl	__aeabi_dmul
+ 1045              	.LVL90:
+ 430:Core/Src/welder.c ****             set_curr = background_current;
+ 1046              		.loc 1 430 50 discriminator 1 view .LVU270
+ 1047 00a4 FFF7FEFF 		bl	__aeabi_d2uiz
+ 1048              	.LVL91:
+ 1049 00a8 80B2     		uxth	r0, r0
+ 430:Core/Src/welder.c ****             set_curr = background_current;
+ 1050              		.loc 1 430 18 discriminator 1 view .LVU271
+ 1051 00aa 8442     		cmp	r4, r0
+ 1052 00ac B4D3     		bcc	.L51
+ 431:Core/Src/welder.c ****         }
+ 1053              		.loc 1 431 13 is_stmt 1 view .LVU272
+ 431:Core/Src/welder.c ****         }
+ 1054              		.loc 1 431 22 is_stmt 0 view .LVU273
+ 1055 00ae 1C4B     		ldr	r3, .L57+48
+ 1056 00b0 1A78     		ldrb	r2, [r3]	@ zero_extendqisi2
+ 1057 00b2 124B     		ldr	r3, .L57+12
+ 1058 00b4 1A80     		strh	r2, [r3]	@ movhi
+ 1059 00b6 AFE7     		b	.L51
+ 1060              	.LVL92:
+ARM GAS  /tmp/ccd93dhD.s 			page 31
+
+
+ 1061              	.L56:
+ 431:Core/Src/welder.c ****         }
+ 1062              		.loc 1 431 22 view .LVU274
+ 1063              	.LBE14:
+ 436:Core/Src/welder.c ****     }
+ 1064              		.loc 1 436 9 is_stmt 1 view .LVU275
+ 436:Core/Src/welder.c ****     }
+ 1065              		.loc 1 436 48 is_stmt 0 view .LVU276
+ 1066 00b8 1A4B     		ldr	r3, .L57+52
+ 1067 00ba D3ED007A 		vldr.32	s15, [r3]	@ int
+ 436:Core/Src/welder.c ****     }
+ 1068              		.loc 1 436 31 view .LVU277
+ 1069 00be F8EE677A 		vcvt.f32.u32	s15, s15
+ 436:Core/Src/welder.c ****     }
+ 1070              		.loc 1 436 29 view .LVU278
+ 1071 00c2 0E4C     		ldr	r4, .L57+12
+ 1072 00c4 2388     		ldrh	r3, [r4]
+ 1073 00c6 07EE103A 		vmov	s14, r3	@ int
+ 1074 00ca B8EEC77A 		vcvt.f32.s32	s14, s14
+ 1075 00ce 67EE277A 		vmul.f32	s15, s14, s15
+ 1076 00d2 17EE900A 		vmov	r0, s15
+ 1077 00d6 FFF7FEFF 		bl	__aeabi_f2d
+ 1078              	.LVL93:
+ 436:Core/Src/welder.c ****     }
+ 1079              		.loc 1 436 51 view .LVU279
+ 1080 00da 05A3     		adr	r3, .L57
+ 1081 00dc D3E90023 		ldrd	r2, [r3]
+ 1082 00e0 FFF7FEFF 		bl	__aeabi_ddiv
+ 1083              	.LVL94:
+ 436:Core/Src/welder.c ****     }
+ 1084              		.loc 1 436 18 view .LVU280
+ 1085 00e4 FFF7FEFF 		bl	__aeabi_d2uiz
+ 1086              	.LVL95:
+ 1087 00e8 2080     		strh	r0, [r4]	@ movhi
+ 1088 00ea 9CE7     		b	.L53
+ 1089              	.L58:
+ 1090 00ec AFF30080 		.align	3
+ 1091              	.L57:
+ 1092 00f0 00000000 		.word	0
+ 1093 00f4 00FEAF40 		.word	1085275648
+ 1094 00f8 00000000 		.word	base_current
+ 1095 00fc 00000000 		.word	set_curr.7
+ 1096 0100 00000000 		.word	welding_mode
+ 1097 0104 00000000 		.word	pedal_connected
+ 1098 0108 00000000 		.word	trigger_type
+ 1099 010c 00000000 		.word	pulse_frequency
+ 1100 0110 00007A44 		.word	1148846080
+ 1101 0114 00000000 		.word	prev_millis.6
+ 1102 0118 00000000 		.word	pulse_duty
+ 1103 011c 00005940 		.word	1079574528
+ 1104 0120 00000000 		.word	background_current
+ 1105 0124 00000000 		.word	adc_buffer
+ 1106              		.cfi_endproc
+ 1107              	.LFE226:
+ 1109              		.section	.text.set_pwm_frequency,"ax",%progbits
+ 1110              		.align	1
+ 1111              		.global	set_pwm_frequency
+ARM GAS  /tmp/ccd93dhD.s 			page 32
+
+
+ 1112              		.syntax unified
+ 1113              		.thumb
+ 1114              		.thumb_func
+ 1116              	set_pwm_frequency:
+ 1117              	.LVL96:
+ 1118              	.LFB228:
+ 453:Core/Src/welder.c **** 
+ 454:Core/Src/welder.c **** void set_pwm_frequency(uint32_t freq)
+ 455:Core/Src/welder.c **** {
+ 1119              		.loc 1 455 1 is_stmt 1 view -0
+ 1120              		.cfi_startproc
+ 1121              		@ args = 0, pretend = 0, frame = 0
+ 1122              		@ frame_needed = 0, uses_anonymous_args = 0
+ 1123              		@ link register save eliminated.
+ 456:Core/Src/welder.c ****     uint32_t pwm_period = 1000000 / freq;
+ 1124              		.loc 1 456 5 view .LVU282
+ 1125              		.loc 1 456 14 is_stmt 0 view .LVU283
+ 1126 0000 044B     		ldr	r3, .L60
+ 1127 0002 B3FBF0F0 		udiv	r0, r3, r0
+ 1128              	.LVL97:
+ 457:Core/Src/welder.c ****     __HAL_TIM_SET_AUTORELOAD(&htim4, pwm_period - 1);
+ 1129              		.loc 1 457 5 is_stmt 1 view .LVU284
+ 1130              		.loc 1 457 5 view .LVU285
+ 1131 0006 044B     		ldr	r3, .L60+4
+ 1132 0008 1A68     		ldr	r2, [r3]
+ 1133 000a 0138     		subs	r0, r0, #1
+ 1134              	.LVL98:
+ 1135              		.loc 1 457 5 is_stmt 0 view .LVU286
+ 1136 000c D062     		str	r0, [r2, #44]
+ 1137              		.loc 1 457 5 is_stmt 1 view .LVU287
+ 1138 000e D860     		str	r0, [r3, #12]
+ 1139              		.loc 1 457 5 view .LVU288
+ 458:Core/Src/welder.c **** }
+ 1140              		.loc 1 458 1 is_stmt 0 view .LVU289
+ 1141 0010 7047     		bx	lr
+ 1142              	.L61:
+ 1143 0012 00BF     		.align	2
+ 1144              	.L60:
+ 1145 0014 40420F00 		.word	1000000
+ 1146 0018 00000000 		.word	htim4
+ 1147              		.cfi_endproc
+ 1148              	.LFE228:
+ 1150              		.section	.text.set_pwm_duty,"ax",%progbits
+ 1151              		.align	1
+ 1152              		.global	set_pwm_duty
+ 1153              		.syntax unified
+ 1154              		.thumb
+ 1155              		.thumb_func
+ 1157              	set_pwm_duty:
+ 1158              	.LVL99:
+ 1159              	.LFB229:
+ 459:Core/Src/welder.c **** 
+ 460:Core/Src/welder.c **** void set_pwm_duty(uint32_t duty)
+ 461:Core/Src/welder.c **** {
+ 1160              		.loc 1 461 1 is_stmt 1 view -0
+ 1161              		.cfi_startproc
+ 1162              		@ args = 0, pretend = 0, frame = 0
+ARM GAS  /tmp/ccd93dhD.s 			page 33
+
+
+ 1163              		@ frame_needed = 0, uses_anonymous_args = 0
+ 1164              		@ link register save eliminated.
+ 462:Core/Src/welder.c ****     uint32_t pwm_period = __HAL_TIM_GET_AUTORELOAD(&htim4);
+ 1165              		.loc 1 462 5 view .LVU291
+ 1166              		.loc 1 462 27 is_stmt 0 view .LVU292
+ 1167 0000 054B     		ldr	r3, .L63
+ 1168 0002 1A68     		ldr	r2, [r3]
+ 1169              		.loc 1 462 14 view .LVU293
+ 1170 0004 D36A     		ldr	r3, [r2, #44]
+ 1171              	.LVL100:
+ 463:Core/Src/welder.c ****     uint32_t pwm_compare = (duty * pwm_period) / 100;
+ 1172              		.loc 1 463 5 is_stmt 1 view .LVU294
+ 1173              		.loc 1 463 34 is_stmt 0 view .LVU295
+ 1174 0006 00FB03F3 		mul	r3, r0, r3
+ 1175              	.LVL101:
+ 1176              		.loc 1 463 14 view .LVU296
+ 1177 000a 0449     		ldr	r1, .L63+4
+ 1178 000c A1FB0313 		umull	r1, r3, r1, r3
+ 1179 0010 5B09     		lsrs	r3, r3, #5
+ 1180              	.LVL102:
+ 464:Core/Src/welder.c ****     __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_4, pwm_compare - 1);
+ 1181              		.loc 1 464 5 is_stmt 1 view .LVU297
+ 1182 0012 013B     		subs	r3, r3, #1
+ 1183              	.LVL103:
+ 1184              		.loc 1 464 5 is_stmt 0 view .LVU298
+ 1185 0014 1364     		str	r3, [r2, #64]
+ 465:Core/Src/welder.c **** }
+ 1186              		.loc 1 465 1 view .LVU299
+ 1187 0016 7047     		bx	lr
+ 1188              	.L64:
+ 1189              		.align	2
+ 1190              	.L63:
+ 1191 0018 00000000 		.word	htim4
+ 1192 001c 1F85EB51 		.word	1374389535
+ 1193              		.cfi_endproc
+ 1194              	.LFE229:
+ 1196              		.section	.text.HAL_GPIO_EXTI_Callback,"ax",%progbits
+ 1197              		.align	1
+ 1198              		.global	HAL_GPIO_EXTI_Callback
+ 1199              		.syntax unified
+ 1200              		.thumb
+ 1201              		.thumb_func
+ 1203              	HAL_GPIO_EXTI_Callback:
+ 1204              	.LVL104:
+ 1205              	.LFB230:
+ 466:Core/Src/welder.c **** 
+ 467:Core/Src/welder.c **** void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+ 468:Core/Src/welder.c **** {
+ 1206              		.loc 1 468 1 is_stmt 1 view -0
+ 1207              		.cfi_startproc
+ 1208              		@ args = 0, pretend = 0, frame = 0
+ 1209              		@ frame_needed = 0, uses_anonymous_args = 0
+ 1210              		@ link register save eliminated.
+ 469:Core/Src/welder.c ****     // deb_current_millis = HAL_GetTick();
+ 470:Core/Src/welder.c ****     // if(deb_current_millis - deb_prev_millis < debounce_time) return;
+ 471:Core/Src/welder.c ****     // deb_prev_millis = deb_current_millis;
+ 472:Core/Src/welder.c **** 
+ARM GAS  /tmp/ccd93dhD.s 			page 34
+
+
+ 473:Core/Src/welder.c **** 
+ 474:Core/Src/welder.c ****     // switch (GPIO_Pin)
+ 475:Core/Src/welder.c ****     // {
+ 476:Core/Src/welder.c ****     // case GPIO_PIN_4: // Do stuff for encoder button
+ 477:Core/Src/welder.c ****     //     break;
+ 478:Core/Src/welder.c ****     // case GPIO_PIN_5: // Do stuff for torch button
+ 479:Core/Src/welder.c ****     //     if (trigger_type == _4T)  // Button is held down
+ 480:Core/Src/welder.c ****     //     {
+ 481:Core/Src/welder.c **** 
+ 482:Core/Src/welder.c ****     //         switch (state)
+ 483:Core/Src/welder.c ****     //         {
+ 484:Core/Src/welder.c ****     //         case preflow:
+ 485:Core/Src/welder.c ****     //             state = idle;
+ 486:Core/Src/welder.c ****     //             break;
+ 487:Core/Src/welder.c ****     //         case ignition:
+ 488:Core/Src/welder.c ****     //             state = idle;
+ 489:Core/Src/welder.c ****     //             break;
+ 490:Core/Src/welder.c ****     //         case upslope:
+ 491:Core/Src/welder.c ****     //             state = crater;
+ 492:Core/Src/welder.c ****     //             break;
+ 493:Core/Src/welder.c ****     //         case welding:
+ 494:Core/Src/welder.c ****     //             state = downslope;
+ 495:Core/Src/welder.c ****     //             break;
+ 496:Core/Src/welder.c ****     //         case downslope:
+ 497:Core/Src/welder.c ****     //             state = upslope;
+ 498:Core/Src/welder.c ****     //             break;
+ 499:Core/Src/welder.c ****     //         case crater:
+ 500:Core/Src/welder.c ****     //             state = ignition;
+ 501:Core/Src/welder.c ****     //             break;
+ 502:Core/Src/welder.c ****     //         case postflow:
+ 503:Core/Src/welder.c ****     //             state = ignition;
+ 504:Core/Src/welder.c ****     //             break;
+ 505:Core/Src/welder.c ****     //         case idle:
+ 506:Core/Src/welder.c ****     //             state = preflow;
+ 507:Core/Src/welder.c ****     //             break;
+ 508:Core/Src/welder.c ****     //         default:
+ 509:Core/Src/welder.c ****     //             break;
+ 510:Core/Src/welder.c ****     //         }
+ 511:Core/Src/welder.c ****     //     }
+ 512:Core/Src/welder.c ****     // default: // Don't do shit
+ 513:Core/Src/welder.c ****     //     break;
+ 514:Core/Src/welder.c ****     // }
+ 515:Core/Src/welder.c **** }
+ 1211              		.loc 1 515 1 view .LVU301
+ 1212 0000 7047     		bx	lr
+ 1213              		.cfi_endproc
+ 1214              	.LFE230:
+ 1216              		.section	.text.LinearTransition,"ax",%progbits
+ 1217              		.align	1
+ 1218              		.global	LinearTransition
+ 1219              		.syntax unified
+ 1220              		.thumb
+ 1221              		.thumb_func
+ 1223              	LinearTransition:
+ 1224              	.LVL105:
+ 1225              	.LFB231:
+ 516:Core/Src/welder.c **** 
+ARM GAS  /tmp/ccd93dhD.s 			page 35
+
+
+ 517:Core/Src/welder.c **** uint16_t LinearTransition(uint16_t a, uint16_t b, uint32_t t_total, uint8_t reset) {
+ 1226              		.loc 1 517 84 view -0
+ 1227              		.cfi_startproc
+ 1228              		@ args = 0, pretend = 0, frame = 0
+ 1229              		@ frame_needed = 0, uses_anonymous_args = 0
+ 1230              		.loc 1 517 84 is_stmt 0 view .LVU303
+ 1231 0000 70B5     		push	{r4, r5, r6, lr}
+ 1232              		.cfi_def_cfa_offset 16
+ 1233              		.cfi_offset 4, -16
+ 1234              		.cfi_offset 5, -12
+ 1235              		.cfi_offset 6, -8
+ 1236              		.cfi_offset 14, -4
+ 1237 0002 0446     		mov	r4, r0
+ 518:Core/Src/welder.c ****     static uint32_t startTime = 0;   // Store the start time
+ 1238              		.loc 1 518 5 is_stmt 1 view .LVU304
+ 519:Core/Src/welder.c ****     static uint8_t started = 0;     // State to track if the transition started
+ 1239              		.loc 1 519 5 view .LVU305
+ 520:Core/Src/welder.c ****     uint16_t result = a;               // Default to the initial value
+ 1240              		.loc 1 520 5 view .LVU306
+ 1241              	.LVL106:
+ 521:Core/Src/welder.c **** 
+ 522:Core/Src/welder.c ****     if(reset){
+ 1242              		.loc 1 522 5 view .LVU307
+ 1243              		.loc 1 522 7 is_stmt 0 view .LVU308
+ 1244 0004 23BB     		cbnz	r3, .L72
+ 1245 0006 0D46     		mov	r5, r1
+ 1246 0008 1646     		mov	r6, r2
+ 523:Core/Src/welder.c ****         started = 0;
+ 524:Core/Src/welder.c ****         return result;
+ 525:Core/Src/welder.c ****     }
+ 526:Core/Src/welder.c **** 
+ 527:Core/Src/welder.c ****     if (!started) {
+ 1247              		.loc 1 527 5 is_stmt 1 view .LVU309
+ 1248              		.loc 1 527 9 is_stmt 0 view .LVU310
+ 1249 000a 1A4B     		ldr	r3, .L74
+ 1250              	.LVL107:
+ 1251              		.loc 1 527 9 view .LVU311
+ 1252 000c 1B78     		ldrb	r3, [r3]	@ zero_extendqisi2
+ 1253              		.loc 1 527 8 view .LVU312
+ 1254 000e 1BB3     		cbz	r3, .L73
+ 1255              	.LVL108:
+ 1256              	.L69:
+ 528:Core/Src/welder.c ****         startTime = HAL_GetTick();  // Record the start time
+ 529:Core/Src/welder.c ****         started = 1;
+ 530:Core/Src/welder.c ****     }
+ 531:Core/Src/welder.c **** 
+ 532:Core/Src/welder.c ****     // Calculate elapsed time
+ 533:Core/Src/welder.c ****     uint32_t elapsedTime = HAL_GetTick() - startTime;
+ 1257              		.loc 1 533 5 is_stmt 1 view .LVU313
+ 1258              		.loc 1 533 28 is_stmt 0 view .LVU314
+ 1259 0010 FFF7FEFF 		bl	HAL_GetTick
+ 1260              	.LVL109:
+ 1261              		.loc 1 533 42 discriminator 1 view .LVU315
+ 1262 0014 184B     		ldr	r3, .L74+4
+ 1263 0016 1B68     		ldr	r3, [r3]
+ 1264              		.loc 1 533 14 discriminator 1 view .LVU316
+ 1265 0018 C01A     		subs	r0, r0, r3
+ARM GAS  /tmp/ccd93dhD.s 			page 36
+
+
+ 1266              	.LVL110:
+ 534:Core/Src/welder.c **** 
+ 535:Core/Src/welder.c ****     if (elapsedTime < t_total) {
+ 1267              		.loc 1 535 5 is_stmt 1 view .LVU317
+ 1268              		.loc 1 535 8 is_stmt 0 view .LVU318
+ 1269 001a B042     		cmp	r0, r6
+ 1270 001c 24D2     		bcs	.L70
+ 536:Core/Src/welder.c ****         // Calculate interpolated value (works for both increase and decrease)
+ 537:Core/Src/welder.c ****         result = a + (int16_t)(((float)(b - a) / (float)t_total) * (float)elapsedTime);
+ 1271              		.loc 1 537 9 is_stmt 1 view .LVU319
+ 1272              		.loc 1 537 43 is_stmt 0 view .LVU320
+ 1273 001e 291B     		subs	r1, r5, r4
+ 1274              		.loc 1 537 33 view .LVU321
+ 1275 0020 07EE901A 		vmov	s15, r1	@ int
+ 1276 0024 F8EEE76A 		vcvt.f32.s32	s13, s15
+ 1277              		.loc 1 537 50 view .LVU322
+ 1278 0028 07EE906A 		vmov	s15, r6	@ int
+ 1279 002c F8EE677A 		vcvt.f32.u32	s15, s15
+ 1280              		.loc 1 537 48 view .LVU323
+ 1281 0030 86EEA77A 		vdiv.f32	s14, s13, s15
+ 1282              		.loc 1 537 68 view .LVU324
+ 1283 0034 07EE900A 		vmov	s15, r0	@ int
+ 1284 0038 F8EE677A 		vcvt.f32.u32	s15, s15
+ 1285              		.loc 1 537 66 view .LVU325
+ 1286 003c 67EE277A 		vmul.f32	s15, s14, s15
+ 1287              		.loc 1 537 22 view .LVU326
+ 1288 0040 FDEEE77A 		vcvt.s32.f32	s15, s15
+ 1289 0044 17EE903A 		vmov	r3, s15	@ int
+ 1290              		.loc 1 537 16 view .LVU327
+ 1291 0048 14FA83F3 		uxtah	r3, r4, r3
+ 1292 004c 98B2     		uxth	r0, r3
+ 1293              	.LVL111:
+ 1294              		.loc 1 537 16 view .LVU328
+ 1295 004e 02E0     		b	.L68
+ 1296              	.LVL112:
+ 1297              	.L72:
+ 523:Core/Src/welder.c ****         return result;
+ 1298              		.loc 1 523 9 is_stmt 1 view .LVU329
+ 523:Core/Src/welder.c ****         return result;
+ 1299              		.loc 1 523 17 is_stmt 0 view .LVU330
+ 1300 0050 084B     		ldr	r3, .L74
+ 1301              	.LVL113:
+ 523:Core/Src/welder.c ****         return result;
+ 1302              		.loc 1 523 17 view .LVU331
+ 1303 0052 0022     		movs	r2, #0
+ 1304              	.LVL114:
+ 523:Core/Src/welder.c ****         return result;
+ 1305              		.loc 1 523 17 view .LVU332
+ 1306 0054 1A70     		strb	r2, [r3]
+ 524:Core/Src/welder.c ****     }
+ 1307              		.loc 1 524 9 is_stmt 1 view .LVU333
+ 1308              	.LVL115:
+ 1309              	.L68:
+ 538:Core/Src/welder.c ****     } else {
+ 539:Core/Src/welder.c ****         // Transition complete
+ 540:Core/Src/welder.c ****         result = b;
+ 541:Core/Src/welder.c ****         started = 0;  // Reset for the next call
+ARM GAS  /tmp/ccd93dhD.s 			page 37
+
+
+ 542:Core/Src/welder.c ****     }
+ 543:Core/Src/welder.c **** 
+ 544:Core/Src/welder.c ****     return result;
+ 545:Core/Src/welder.c **** }
+ 1310              		.loc 1 545 1 is_stmt 0 view .LVU334
+ 1311 0056 70BD     		pop	{r4, r5, r6, pc}
+ 1312              	.LVL116:
+ 1313              	.L73:
+ 528:Core/Src/welder.c ****         started = 1;
+ 1314              		.loc 1 528 9 is_stmt 1 view .LVU335
+ 528:Core/Src/welder.c ****         started = 1;
+ 1315              		.loc 1 528 21 is_stmt 0 view .LVU336
+ 1316 0058 FFF7FEFF 		bl	HAL_GetTick
+ 1317              	.LVL117:
+ 528:Core/Src/welder.c ****         started = 1;
+ 1318              		.loc 1 528 19 discriminator 1 view .LVU337
+ 1319 005c 064B     		ldr	r3, .L74+4
+ 1320 005e 1860     		str	r0, [r3]
+ 529:Core/Src/welder.c ****     }
+ 1321              		.loc 1 529 9 is_stmt 1 view .LVU338
+ 529:Core/Src/welder.c ****     }
+ 1322              		.loc 1 529 17 is_stmt 0 view .LVU339
+ 1323 0060 044B     		ldr	r3, .L74
+ 1324 0062 0122     		movs	r2, #1
+ 1325 0064 1A70     		strb	r2, [r3]
+ 1326 0066 D3E7     		b	.L69
+ 1327              	.LVL118:
+ 1328              	.L70:
+ 540:Core/Src/welder.c ****         started = 0;  // Reset for the next call
+ 1329              		.loc 1 540 9 is_stmt 1 view .LVU340
+ 541:Core/Src/welder.c ****     }
+ 1330              		.loc 1 541 9 view .LVU341
+ 541:Core/Src/welder.c ****     }
+ 1331              		.loc 1 541 17 is_stmt 0 view .LVU342
+ 1332 0068 024B     		ldr	r3, .L74
+ 1333 006a 0022     		movs	r2, #0
+ 1334 006c 1A70     		strb	r2, [r3]
+ 540:Core/Src/welder.c ****         started = 0;  // Reset for the next call
+ 1335              		.loc 1 540 16 view .LVU343
+ 1336 006e 2846     		mov	r0, r5
+ 1337              	.LVL119:
+ 540:Core/Src/welder.c ****         started = 0;  // Reset for the next call
+ 1338              		.loc 1 540 16 view .LVU344
+ 1339 0070 F1E7     		b	.L68
+ 1340              	.L75:
+ 1341 0072 00BF     		.align	2
+ 1342              	.L74:
+ 1343 0074 00000000 		.word	started.5
+ 1344 0078 00000000 		.word	startTime.4
+ 1345              		.cfi_endproc
+ 1346              	.LFE231:
+ 1348              		.section	.text.HAL_TIM_PeriodElapsedCallback,"ax",%progbits
+ 1349              		.align	1
+ 1350              		.global	HAL_TIM_PeriodElapsedCallback
+ 1351              		.syntax unified
+ 1352              		.thumb
+ 1353              		.thumb_func
+ARM GAS  /tmp/ccd93dhD.s 			page 38
+
+
+ 1355              	HAL_TIM_PeriodElapsedCallback:
+ 1356              	.LVL120:
+ 1357              	.LFB232:
+ 546:Core/Src/welder.c **** 
+ 547:Core/Src/welder.c **** void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
+ 1358              		.loc 1 547 61 is_stmt 1 view -0
+ 1359              		.cfi_startproc
+ 1360              		@ args = 0, pretend = 0, frame = 0
+ 1361              		@ frame_needed = 0, uses_anonymous_args = 0
+ 1362              		.loc 1 547 61 is_stmt 0 view .LVU346
+ 1363 0000 08B5     		push	{r3, lr}
+ 1364              		.cfi_def_cfa_offset 8
+ 1365              		.cfi_offset 3, -8
+ 1366              		.cfi_offset 14, -4
+ 548:Core/Src/welder.c ****     static uint8_t ttrig = 0;
+ 1367              		.loc 1 548 5 is_stmt 1 view .LVU347
+ 549:Core/Src/welder.c ****     static uint8_t etrig = 0;
+ 1368              		.loc 1 549 5 view .LVU348
+ 550:Core/Src/welder.c ****     if (htim->Instance == TIM11) {
+ 1369              		.loc 1 550 5 view .LVU349
+ 1370              		.loc 1 550 13 is_stmt 0 view .LVU350
+ 1371 0002 0268     		ldr	r2, [r0]
+ 1372              		.loc 1 550 8 view .LVU351
+ 1373 0004 1A4B     		ldr	r3, .L87
+ 1374 0006 9A42     		cmp	r2, r3
+ 1375 0008 00D0     		beq	.L86
+ 1376              	.LVL121:
+ 1377              	.L76:
+ 551:Core/Src/welder.c ****         if(HAL_GPIO_ReadPin(TORCH_BUTTON_GPIO_Port, TORCH_BUTTON_Pin) == 0) {
+ 552:Core/Src/welder.c ****             switch (ttrig)
+ 553:Core/Src/welder.c ****             {
+ 554:Core/Src/welder.c ****             case 0:
+ 555:Core/Src/welder.c ****                 ttrig = 1;
+ 556:Core/Src/welder.c ****                 break;
+ 557:Core/Src/welder.c ****             case 1:
+ 558:Core/Src/welder.c ****                 torch_trigger = 1;
+ 559:Core/Src/welder.c ****                 ttrig = 2;
+ 560:Core/Src/welder.c ****             break;
+ 561:Core/Src/welder.c ****             default:
+ 562:Core/Src/welder.c ****                 
+ 563:Core/Src/welder.c ****                 break;
+ 564:Core/Src/welder.c ****             }
+ 565:Core/Src/welder.c ****         }else{
+ 566:Core/Src/welder.c ****             ttrig = 0;
+ 567:Core/Src/welder.c ****         }
+ 568:Core/Src/welder.c ****         if(HAL_GPIO_ReadPin(ENC_BUTTON_GPIO_Port, ENC_BUTTON_Pin) == 0) {
+ 569:Core/Src/welder.c ****             switch (etrig)
+ 570:Core/Src/welder.c ****             {
+ 571:Core/Src/welder.c ****             case 0:
+ 572:Core/Src/welder.c ****                 etrig = 1;
+ 573:Core/Src/welder.c ****                 break;
+ 574:Core/Src/welder.c ****             case 1:
+ 575:Core/Src/welder.c ****                 encoder_button = 1;
+ 576:Core/Src/welder.c ****                 etrig = 2;
+ 577:Core/Src/welder.c ****             break;
+ 578:Core/Src/welder.c ****             default:
+ 579:Core/Src/welder.c **** 
+ARM GAS  /tmp/ccd93dhD.s 			page 39
+
+
+ 580:Core/Src/welder.c ****                 break;
+ 581:Core/Src/welder.c ****             }
+ 582:Core/Src/welder.c ****         }else {
+ 583:Core/Src/welder.c ****             etrig = 0;
+ 584:Core/Src/welder.c ****         }
+ 585:Core/Src/welder.c ****     }
+ 586:Core/Src/welder.c **** }
+ 1378              		.loc 1 586 1 view .LVU352
+ 1379 000a 08BD     		pop	{r3, pc}
+ 1380              	.LVL122:
+ 1381              	.L86:
+ 551:Core/Src/welder.c ****         if(HAL_GPIO_ReadPin(TORCH_BUTTON_GPIO_Port, TORCH_BUTTON_Pin) == 0) {
+ 1382              		.loc 1 551 9 is_stmt 1 view .LVU353
+ 551:Core/Src/welder.c ****         if(HAL_GPIO_ReadPin(TORCH_BUTTON_GPIO_Port, TORCH_BUTTON_Pin) == 0) {
+ 1383              		.loc 1 551 12 is_stmt 0 view .LVU354
+ 1384 000c 2021     		movs	r1, #32
+ 1385 000e 1948     		ldr	r0, .L87+4
+ 1386              	.LVL123:
+ 551:Core/Src/welder.c ****         if(HAL_GPIO_ReadPin(TORCH_BUTTON_GPIO_Port, TORCH_BUTTON_Pin) == 0) {
+ 1387              		.loc 1 551 12 view .LVU355
+ 1388 0010 FFF7FEFF 		bl	HAL_GPIO_ReadPin
+ 1389              	.LVL124:
+ 551:Core/Src/welder.c ****         if(HAL_GPIO_ReadPin(TORCH_BUTTON_GPIO_Port, TORCH_BUTTON_Pin) == 0) {
+ 1390              		.loc 1 551 11 discriminator 1 view .LVU356
+ 1391 0014 78B9     		cbnz	r0, .L78
+ 552:Core/Src/welder.c ****             {
+ 1392              		.loc 1 552 13 is_stmt 1 view .LVU357
+ 1393 0016 184B     		ldr	r3, .L87+8
+ 1394 0018 1B78     		ldrb	r3, [r3]	@ zero_extendqisi2
+ 1395 001a 43B1     		cbz	r3, .L79
+ 1396 001c 012B     		cmp	r3, #1
+ 1397 001e 0DD1     		bne	.L81
+ 558:Core/Src/welder.c ****                 ttrig = 2;
+ 1398              		.loc 1 558 17 view .LVU358
+ 558:Core/Src/welder.c ****                 ttrig = 2;
+ 1399              		.loc 1 558 31 is_stmt 0 view .LVU359
+ 1400 0020 164B     		ldr	r3, .L87+12
+ 1401 0022 0122     		movs	r2, #1
+ 1402 0024 1A70     		strb	r2, [r3]
+ 559:Core/Src/welder.c ****             break;
+ 1403              		.loc 1 559 17 is_stmt 1 view .LVU360
+ 559:Core/Src/welder.c ****             break;
+ 1404              		.loc 1 559 23 is_stmt 0 view .LVU361
+ 1405 0026 144B     		ldr	r3, .L87+8
+ 1406 0028 0222     		movs	r2, #2
+ 1407 002a 1A70     		strb	r2, [r3]
+ 560:Core/Src/welder.c ****             default:
+ 1408              		.loc 1 560 13 is_stmt 1 view .LVU362
+ 1409 002c 06E0     		b	.L81
+ 1410              	.L79:
+ 555:Core/Src/welder.c ****                 break;
+ 1411              		.loc 1 555 17 view .LVU363
+ 555:Core/Src/welder.c ****                 break;
+ 1412              		.loc 1 555 23 is_stmt 0 view .LVU364
+ 1413 002e 124B     		ldr	r3, .L87+8
+ 1414 0030 0122     		movs	r2, #1
+ 1415 0032 1A70     		strb	r2, [r3]
+ARM GAS  /tmp/ccd93dhD.s 			page 40
+
+
+ 556:Core/Src/welder.c ****             case 1:
+ 1416              		.loc 1 556 17 is_stmt 1 view .LVU365
+ 1417 0034 02E0     		b	.L81
+ 1418              	.L78:
+ 566:Core/Src/welder.c ****         }
+ 1419              		.loc 1 566 13 view .LVU366
+ 566:Core/Src/welder.c ****         }
+ 1420              		.loc 1 566 19 is_stmt 0 view .LVU367
+ 1421 0036 104B     		ldr	r3, .L87+8
+ 1422 0038 0022     		movs	r2, #0
+ 1423 003a 1A70     		strb	r2, [r3]
+ 1424              	.L81:
+ 568:Core/Src/welder.c ****             switch (etrig)
+ 1425              		.loc 1 568 9 is_stmt 1 view .LVU368
+ 568:Core/Src/welder.c ****             switch (etrig)
+ 1426              		.loc 1 568 12 is_stmt 0 view .LVU369
+ 1427 003c 1021     		movs	r1, #16
+ 1428 003e 0D48     		ldr	r0, .L87+4
+ 1429 0040 FFF7FEFF 		bl	HAL_GPIO_ReadPin
+ 1430              	.LVL125:
+ 568:Core/Src/welder.c ****             switch (etrig)
+ 1431              		.loc 1 568 11 discriminator 1 view .LVU370
+ 1432 0044 78B9     		cbnz	r0, .L82
+ 569:Core/Src/welder.c ****             {
+ 1433              		.loc 1 569 13 is_stmt 1 view .LVU371
+ 1434 0046 0E4B     		ldr	r3, .L87+16
+ 1435 0048 1B78     		ldrb	r3, [r3]	@ zero_extendqisi2
+ 1436 004a 43B1     		cbz	r3, .L83
+ 1437 004c 012B     		cmp	r3, #1
+ 1438 004e DCD1     		bne	.L76
+ 575:Core/Src/welder.c ****                 etrig = 2;
+ 1439              		.loc 1 575 17 view .LVU372
+ 575:Core/Src/welder.c ****                 etrig = 2;
+ 1440              		.loc 1 575 32 is_stmt 0 view .LVU373
+ 1441 0050 0C4B     		ldr	r3, .L87+20
+ 1442 0052 0122     		movs	r2, #1
+ 1443 0054 1A70     		strb	r2, [r3]
+ 576:Core/Src/welder.c ****             break;
+ 1444              		.loc 1 576 17 is_stmt 1 view .LVU374
+ 576:Core/Src/welder.c ****             break;
+ 1445              		.loc 1 576 23 is_stmt 0 view .LVU375
+ 1446 0056 0A4B     		ldr	r3, .L87+16
+ 1447 0058 0222     		movs	r2, #2
+ 1448 005a 1A70     		strb	r2, [r3]
+ 577:Core/Src/welder.c ****             default:
+ 1449              		.loc 1 577 13 is_stmt 1 view .LVU376
+ 1450 005c D5E7     		b	.L76
+ 1451              	.L83:
+ 572:Core/Src/welder.c ****                 break;
+ 1452              		.loc 1 572 17 view .LVU377
+ 572:Core/Src/welder.c ****                 break;
+ 1453              		.loc 1 572 23 is_stmt 0 view .LVU378
+ 1454 005e 084B     		ldr	r3, .L87+16
+ 1455 0060 0122     		movs	r2, #1
+ 1456 0062 1A70     		strb	r2, [r3]
+ 573:Core/Src/welder.c ****             case 1:
+ 1457              		.loc 1 573 17 is_stmt 1 view .LVU379
+ARM GAS  /tmp/ccd93dhD.s 			page 41
+
+
+ 1458 0064 D1E7     		b	.L76
+ 1459              	.L82:
+ 583:Core/Src/welder.c ****         }
+ 1460              		.loc 1 583 13 view .LVU380
+ 583:Core/Src/welder.c ****         }
+ 1461              		.loc 1 583 19 is_stmt 0 view .LVU381
+ 1462 0066 064B     		ldr	r3, .L87+16
+ 1463 0068 0022     		movs	r2, #0
+ 1464 006a 1A70     		strb	r2, [r3]
+ 1465              		.loc 1 586 1 view .LVU382
+ 1466 006c CDE7     		b	.L76
+ 1467              	.L88:
+ 1468 006e 00BF     		.align	2
+ 1469              	.L87:
+ 1470 0070 00480140 		.word	1073825792
+ 1471 0074 00040240 		.word	1073873920
+ 1472 0078 00000000 		.word	ttrig.3
+ 1473 007c 00000000 		.word	torch_trigger
+ 1474 0080 00000000 		.word	etrig.2
+ 1475 0084 00000000 		.word	encoder_button
+ 1476              		.cfi_endproc
+ 1477              	.LFE232:
+ 1479              		.section	.text.NB_Delay,"ax",%progbits
+ 1480              		.align	1
+ 1481              		.global	NB_Delay
+ 1482              		.syntax unified
+ 1483              		.thumb
+ 1484              		.thumb_func
+ 1486              	NB_Delay:
+ 1487              	.LVL126:
+ 1488              	.LFB233:
+ 587:Core/Src/welder.c **** 
+ 588:Core/Src/welder.c **** uint8_t NB_Delay(uint32_t delay_time, uint8_t reset){
+ 1489              		.loc 1 588 53 is_stmt 1 view -0
+ 1490              		.cfi_startproc
+ 1491              		@ args = 0, pretend = 0, frame = 0
+ 1492              		@ frame_needed = 0, uses_anonymous_args = 0
+ 1493              		.loc 1 588 53 is_stmt 0 view .LVU384
+ 1494 0000 38B5     		push	{r3, r4, r5, lr}
+ 1495              		.cfi_def_cfa_offset 16
+ 1496              		.cfi_offset 3, -16
+ 1497              		.cfi_offset 4, -12
+ 1498              		.cfi_offset 5, -8
+ 1499              		.cfi_offset 14, -4
+ 589:Core/Src/welder.c ****     static uint32_t startTime = 0;   // Store the start time
+ 1500              		.loc 1 589 5 is_stmt 1 view .LVU385
+ 590:Core/Src/welder.c ****     static uint8_t started = 0;     // State to track if the transition started
+ 1501              		.loc 1 590 5 view .LVU386
+ 591:Core/Src/welder.c **** 
+ 592:Core/Src/welder.c ****     if(reset){
+ 1502              		.loc 1 592 5 view .LVU387
+ 1503              		.loc 1 592 7 is_stmt 0 view .LVU388
+ 1504 0002 81B9     		cbnz	r1, .L95
+ 1505 0004 0546     		mov	r5, r0
+ 1506 0006 0C46     		mov	r4, r1
+ 593:Core/Src/welder.c ****         started = 0;
+ 594:Core/Src/welder.c ****         return 1;
+ARM GAS  /tmp/ccd93dhD.s 			page 42
+
+
+ 595:Core/Src/welder.c ****     }
+ 596:Core/Src/welder.c **** 
+ 597:Core/Src/welder.c ****     if (!started) {
+ 1507              		.loc 1 597 5 is_stmt 1 view .LVU389
+ 1508              		.loc 1 597 9 is_stmt 0 view .LVU390
+ 1509 0008 0E4B     		ldr	r3, .L97
+ 1510 000a 1B78     		ldrb	r3, [r3]	@ zero_extendqisi2
+ 1511              		.loc 1 597 8 view .LVU391
+ 1512 000c 83B1     		cbz	r3, .L96
+ 1513              	.LVL127:
+ 1514              	.L92:
+ 598:Core/Src/welder.c ****         startTime = HAL_GetTick();  // Record the start time
+ 599:Core/Src/welder.c ****         started = 1;
+ 600:Core/Src/welder.c ****     }
+ 601:Core/Src/welder.c **** 
+ 602:Core/Src/welder.c ****     if(HAL_GetTick() - startTime < delay_time){
+ 1515              		.loc 1 602 5 is_stmt 1 view .LVU392
+ 1516              		.loc 1 602 8 is_stmt 0 view .LVU393
+ 1517 000e FFF7FEFF 		bl	HAL_GetTick
+ 1518              	.LVL128:
+ 1519              		.loc 1 602 22 discriminator 1 view .LVU394
+ 1520 0012 0D4B     		ldr	r3, .L97+4
+ 1521 0014 1B68     		ldr	r3, [r3]
+ 1522 0016 C31A     		subs	r3, r0, r3
+ 1523              		.loc 1 602 7 discriminator 1 view .LVU395
+ 1524 0018 AB42     		cmp	r3, r5
+ 1525 001a 11D3     		bcc	.L93
+ 603:Core/Src/welder.c ****         return 0;
+ 604:Core/Src/welder.c ****     }
+ 605:Core/Src/welder.c ****     started = 0;
+ 1526              		.loc 1 605 5 is_stmt 1 view .LVU396
+ 1527              		.loc 1 605 13 is_stmt 0 view .LVU397
+ 1528 001c 094B     		ldr	r3, .L97
+ 1529 001e 0022     		movs	r2, #0
+ 1530 0020 1A70     		strb	r2, [r3]
+ 606:Core/Src/welder.c ****     return 1;
+ 1531              		.loc 1 606 5 is_stmt 1 view .LVU398
+ 1532              		.loc 1 606 12 is_stmt 0 view .LVU399
+ 1533 0022 0120     		movs	r0, #1
+ 1534              	.LVL129:
+ 1535              	.L91:
+ 607:Core/Src/welder.c **** }
+ 1536              		.loc 1 607 1 view .LVU400
+ 1537 0024 38BD     		pop	{r3, r4, r5, pc}
+ 1538              	.LVL130:
+ 1539              	.L95:
+ 593:Core/Src/welder.c ****         return 1;
+ 1540              		.loc 1 593 9 is_stmt 1 view .LVU401
+ 593:Core/Src/welder.c ****         return 1;
+ 1541              		.loc 1 593 17 is_stmt 0 view .LVU402
+ 1542 0026 074B     		ldr	r3, .L97
+ 1543 0028 0022     		movs	r2, #0
+ 1544 002a 1A70     		strb	r2, [r3]
+ 594:Core/Src/welder.c ****     }
+ 1545              		.loc 1 594 9 is_stmt 1 view .LVU403
+ 594:Core/Src/welder.c ****     }
+ 1546              		.loc 1 594 16 is_stmt 0 view .LVU404
+ARM GAS  /tmp/ccd93dhD.s 			page 43
+
+
+ 1547 002c 0120     		movs	r0, #1
+ 1548              	.LVL131:
+ 594:Core/Src/welder.c ****     }
+ 1549              		.loc 1 594 16 view .LVU405
+ 1550 002e F9E7     		b	.L91
+ 1551              	.LVL132:
+ 1552              	.L96:
+ 598:Core/Src/welder.c ****         started = 1;
+ 1553              		.loc 1 598 9 is_stmt 1 view .LVU406
+ 598:Core/Src/welder.c ****         started = 1;
+ 1554              		.loc 1 598 21 is_stmt 0 view .LVU407
+ 1555 0030 FFF7FEFF 		bl	HAL_GetTick
+ 1556              	.LVL133:
+ 598:Core/Src/welder.c ****         started = 1;
+ 1557              		.loc 1 598 19 discriminator 1 view .LVU408
+ 1558 0034 044B     		ldr	r3, .L97+4
+ 1559 0036 1860     		str	r0, [r3]
+ 599:Core/Src/welder.c ****     }
+ 1560              		.loc 1 599 9 is_stmt 1 view .LVU409
+ 599:Core/Src/welder.c ****     }
+ 1561              		.loc 1 599 17 is_stmt 0 view .LVU410
+ 1562 0038 024B     		ldr	r3, .L97
+ 1563 003a 0122     		movs	r2, #1
+ 1564 003c 1A70     		strb	r2, [r3]
+ 1565 003e E6E7     		b	.L92
+ 1566              	.L93:
+ 603:Core/Src/welder.c ****     }
+ 1567              		.loc 1 603 16 view .LVU411
+ 1568 0040 2046     		mov	r0, r4
+ 1569 0042 EFE7     		b	.L91
+ 1570              	.L98:
+ 1571              		.align	2
+ 1572              	.L97:
+ 1573 0044 00000000 		.word	started.1
+ 1574 0048 00000000 		.word	startTime.0
+ 1575              		.cfi_endproc
+ 1576              	.LFE233:
+ 1578              		.section	.text.stop_condition,"ax",%progbits
+ 1579              		.align	1
+ 1580              		.global	stop_condition
+ 1581              		.syntax unified
+ 1582              		.thumb
+ 1583              		.thumb_func
+ 1585              	stop_condition:
+ 1586              	.LFB234:
+ 608:Core/Src/welder.c **** 
+ 609:Core/Src/welder.c **** uint8_t stop_condition(){         // If any of these are true - go into another stage
+ 1587              		.loc 1 609 25 is_stmt 1 view -0
+ 1588              		.cfi_startproc
+ 1589              		@ args = 0, pretend = 0, frame = 0
+ 1590              		@ frame_needed = 0, uses_anonymous_args = 0
+ 1591 0000 08B5     		push	{r3, lr}
+ 1592              		.cfi_def_cfa_offset 8
+ 1593              		.cfi_offset 3, -8
+ 1594              		.cfi_offset 14, -4
+ 610:Core/Src/welder.c ****     if((trigger_type == _2T && HAL_GPIO_ReadPin(TORCH_BUTTON_GPIO_Port,TORCH_BUTTON_Pin) == 1) || (
+ 1595              		.loc 1 610 5 view .LVU413
+ARM GAS  /tmp/ccd93dhD.s 			page 44
+
+
+ 1596              		.loc 1 610 22 is_stmt 0 view .LVU414
+ 1597 0002 144B     		ldr	r3, .L110
+ 1598 0004 1B78     		ldrb	r3, [r3]	@ zero_extendqisi2
+ 1599              		.loc 1 610 7 view .LVU415
+ 1600 0006 022B     		cmp	r3, #2
+ 1601 0008 0DD0     		beq	.L107
+ 1602              	.L100:
+ 1603              		.loc 1 610 113 discriminator 3 view .LVU416
+ 1604 000a 124B     		ldr	r3, .L110
+ 1605 000c 1B78     		ldrb	r3, [r3]	@ zero_extendqisi2
+ 1606              		.loc 1 610 96 discriminator 3 view .LVU417
+ 1607 000e 042B     		cmp	r3, #4
+ 1608 0010 10D0     		beq	.L108
+ 1609              	.L102:
+ 611:Core/Src/welder.c ****         torch_trigger = 0;
+ 612:Core/Src/welder.c ****         return 1;
+ 613:Core/Src/welder.c ****     }
+ 614:Core/Src/welder.c ****     if(adc_buffer[0] <= 50 && pedal_connected == 1 && trigger_type == _4T) return 1;
+ 1610              		.loc 1 614 5 is_stmt 1 view .LVU418
+ 1611              		.loc 1 614 18 is_stmt 0 view .LVU419
+ 1612 0012 114A     		ldr	r2, .L110+4
+ 1613 0014 1268     		ldr	r2, [r2]
+ 1614              		.loc 1 614 7 view .LVU420
+ 1615 0016 322A     		cmp	r2, #50
+ 1616 0018 19D8     		bhi	.L104
+ 1617              		.loc 1 614 47 discriminator 1 view .LVU421
+ 1618 001a 104A     		ldr	r2, .L110+8
+ 1619 001c 1078     		ldrb	r0, [r2]	@ zero_extendqisi2
+ 1620              		.loc 1 614 28 discriminator 1 view .LVU422
+ 1621 001e 0128     		cmp	r0, #1
+ 1622 0020 11D0     		beq	.L109
+ 615:Core/Src/welder.c ****     return 0;
+ 1623              		.loc 1 615 12 view .LVU423
+ 1624 0022 0020     		movs	r0, #0
+ 1625 0024 14E0     		b	.L103
+ 1626              	.L107:
+ 610:Core/Src/welder.c ****     if((trigger_type == _2T && HAL_GPIO_ReadPin(TORCH_BUTTON_GPIO_Port,TORCH_BUTTON_Pin) == 1) || (
+ 1627              		.loc 1 610 32 discriminator 1 view .LVU424
+ 1628 0026 2021     		movs	r1, #32
+ 1629 0028 0D48     		ldr	r0, .L110+12
+ 1630 002a FFF7FEFF 		bl	HAL_GPIO_ReadPin
+ 1631              	.LVL134:
+ 610:Core/Src/welder.c ****     if((trigger_type == _2T && HAL_GPIO_ReadPin(TORCH_BUTTON_GPIO_Port,TORCH_BUTTON_Pin) == 1) || (
+ 1632              		.loc 1 610 29 discriminator 1 view .LVU425
+ 1633 002e 0128     		cmp	r0, #1
+ 1634 0030 EBD1     		bne	.L100
+ 1635 0032 03E0     		b	.L101
+ 1636              	.L108:
+ 610:Core/Src/welder.c ****     if((trigger_type == _2T && HAL_GPIO_ReadPin(TORCH_BUTTON_GPIO_Port,TORCH_BUTTON_Pin) == 1) || (
+ 1637              		.loc 1 610 137 discriminator 4 view .LVU426
+ 1638 0034 0B4A     		ldr	r2, .L110+16
+ 1639 0036 1278     		ldrb	r2, [r2]	@ zero_extendqisi2
+ 610:Core/Src/welder.c ****     if((trigger_type == _2T && HAL_GPIO_ReadPin(TORCH_BUTTON_GPIO_Port,TORCH_BUTTON_Pin) == 1) || (
+ 1640              		.loc 1 610 120 discriminator 4 view .LVU427
+ 1641 0038 012A     		cmp	r2, #1
+ 1642 003a EAD1     		bne	.L102
+ 1643              	.L101:
+ARM GAS  /tmp/ccd93dhD.s 			page 45
+
+
+ 611:Core/Src/welder.c ****         torch_trigger = 0;
+ 1644              		.loc 1 611 9 is_stmt 1 view .LVU428
+ 611:Core/Src/welder.c ****         torch_trigger = 0;
+ 1645              		.loc 1 611 23 is_stmt 0 view .LVU429
+ 1646 003c 094B     		ldr	r3, .L110+16
+ 1647 003e 0022     		movs	r2, #0
+ 1648 0040 1A70     		strb	r2, [r3]
+ 612:Core/Src/welder.c ****     }
+ 1649              		.loc 1 612 9 is_stmt 1 view .LVU430
+ 612:Core/Src/welder.c ****     }
+ 1650              		.loc 1 612 16 is_stmt 0 view .LVU431
+ 1651 0042 0120     		movs	r0, #1
+ 1652 0044 04E0     		b	.L103
+ 1653              	.L109:
+ 614:Core/Src/welder.c ****     return 0;
+ 1654              		.loc 1 614 52 discriminator 2 view .LVU432
+ 1655 0046 042B     		cmp	r3, #4
+ 1656 0048 02D0     		beq	.L103
+ 1657              		.loc 1 615 12 view .LVU433
+ 1658 004a 0020     		movs	r0, #0
+ 1659 004c 00E0     		b	.L103
+ 1660              	.L104:
+ 1661 004e 0020     		movs	r0, #0
+ 1662              	.L103:
+ 616:Core/Src/welder.c **** }
+ 1663              		.loc 1 616 1 view .LVU434
+ 1664 0050 08BD     		pop	{r3, pc}
+ 1665              	.L111:
+ 1666 0052 00BF     		.align	2
+ 1667              	.L110:
+ 1668 0054 00000000 		.word	trigger_type
+ 1669 0058 00000000 		.word	adc_buffer
+ 1670 005c 00000000 		.word	pedal_connected
+ 1671 0060 00040240 		.word	1073873920
+ 1672 0064 00000000 		.word	torch_trigger
+ 1673              		.cfi_endproc
+ 1674              	.LFE234:
+ 1676              		.section	.text.start_condition,"ax",%progbits
+ 1677              		.align	1
+ 1678              		.global	start_condition
+ 1679              		.syntax unified
+ 1680              		.thumb
+ 1681              		.thumb_func
+ 1683              	start_condition:
+ 1684              	.LFB235:
+ 617:Core/Src/welder.c **** 
+ 618:Core/Src/welder.c **** uint8_t start_condition(){
+ 1685              		.loc 1 618 26 is_stmt 1 view -0
+ 1686              		.cfi_startproc
+ 1687              		@ args = 0, pretend = 0, frame = 0
+ 1688              		@ frame_needed = 0, uses_anonymous_args = 0
+ 1689 0000 08B5     		push	{r3, lr}
+ 1690              		.cfi_def_cfa_offset 8
+ 1691              		.cfi_offset 3, -8
+ 1692              		.cfi_offset 14, -4
+ 619:Core/Src/welder.c ****     if((trigger_type == _2T && HAL_GPIO_ReadPin(TORCH_BUTTON_GPIO_Port,TORCH_BUTTON_Pin) == 0) || (
+ 1693              		.loc 1 619 5 view .LVU436
+ARM GAS  /tmp/ccd93dhD.s 			page 46
+
+
+ 1694              		.loc 1 619 22 is_stmt 0 view .LVU437
+ 1695 0002 154B     		ldr	r3, .L123
+ 1696 0004 1B78     		ldrb	r3, [r3]	@ zero_extendqisi2
+ 1697              		.loc 1 619 7 view .LVU438
+ 1698 0006 022B     		cmp	r3, #2
+ 1699 0008 0FD0     		beq	.L120
+ 1700              	.L113:
+ 1701              		.loc 1 619 113 discriminator 3 view .LVU439
+ 1702 000a 134B     		ldr	r3, .L123
+ 1703 000c 1B78     		ldrb	r3, [r3]	@ zero_extendqisi2
+ 1704              		.loc 1 619 96 discriminator 3 view .LVU440
+ 1705 000e 042B     		cmp	r3, #4
+ 1706 0010 16D0     		beq	.L121
+ 1707              	.L115:
+ 620:Core/Src/welder.c ****         torch_trigger = 0;
+ 621:Core/Src/welder.c ****         return 1;
+ 622:Core/Src/welder.c ****     }
+ 623:Core/Src/welder.c ****     if(adc_buffer[0] >= 4095 - 500 && pedal_connected == 1 && trigger_type == _4T) return 1;       
+ 1708              		.loc 1 623 5 is_stmt 1 view .LVU441
+ 1709              		.loc 1 623 18 is_stmt 0 view .LVU442
+ 1710 0012 124A     		ldr	r2, .L123+4
+ 1711 0014 1168     		ldr	r1, [r2]
+ 1712              		.loc 1 623 7 view .LVU443
+ 1713 0016 40F60A62 		movw	r2, #3594
+ 1714 001a 9142     		cmp	r1, r2
+ 1715 001c 19D9     		bls	.L117
+ 1716              		.loc 1 623 55 discriminator 1 view .LVU444
+ 1717 001e 104A     		ldr	r2, .L123+8
+ 1718 0020 1078     		ldrb	r0, [r2]	@ zero_extendqisi2
+ 1719              		.loc 1 623 36 discriminator 1 view .LVU445
+ 1720 0022 0128     		cmp	r0, #1
+ 1721 0024 11D0     		beq	.L122
+ 624:Core/Src/welder.c ****     return 0;
+ 1722              		.loc 1 624 12 view .LVU446
+ 1723 0026 0020     		movs	r0, #0
+ 1724 0028 14E0     		b	.L116
+ 1725              	.L120:
+ 619:Core/Src/welder.c ****     if((trigger_type == _2T && HAL_GPIO_ReadPin(TORCH_BUTTON_GPIO_Port,TORCH_BUTTON_Pin) == 0) || (
+ 1726              		.loc 1 619 32 discriminator 1 view .LVU447
+ 1727 002a 2021     		movs	r1, #32
+ 1728 002c 0D48     		ldr	r0, .L123+12
+ 1729 002e FFF7FEFF 		bl	HAL_GPIO_ReadPin
+ 1730              	.LVL135:
+ 619:Core/Src/welder.c ****     if((trigger_type == _2T && HAL_GPIO_ReadPin(TORCH_BUTTON_GPIO_Port,TORCH_BUTTON_Pin) == 0) || (
+ 1731              		.loc 1 619 29 discriminator 1 view .LVU448
+ 1732 0032 0028     		cmp	r0, #0
+ 1733 0034 E9D1     		bne	.L113
+ 1734              	.L114:
+ 620:Core/Src/welder.c ****         torch_trigger = 0;
+ 1735              		.loc 1 620 9 is_stmt 1 view .LVU449
+ 620:Core/Src/welder.c ****         torch_trigger = 0;
+ 1736              		.loc 1 620 23 is_stmt 0 view .LVU450
+ 1737 0036 0C4B     		ldr	r3, .L123+16
+ 1738 0038 0022     		movs	r2, #0
+ 1739 003a 1A70     		strb	r2, [r3]
+ 621:Core/Src/welder.c ****     }
+ 1740              		.loc 1 621 9 is_stmt 1 view .LVU451
+ARM GAS  /tmp/ccd93dhD.s 			page 47
+
+
+ 621:Core/Src/welder.c ****     }
+ 1741              		.loc 1 621 16 is_stmt 0 view .LVU452
+ 1742 003c 0120     		movs	r0, #1
+ 1743 003e 09E0     		b	.L116
+ 1744              	.L121:
+ 619:Core/Src/welder.c ****         torch_trigger = 0;
+ 1745              		.loc 1 619 137 discriminator 4 view .LVU453
+ 1746 0040 094A     		ldr	r2, .L123+16
+ 1747 0042 1278     		ldrb	r2, [r2]	@ zero_extendqisi2
+ 619:Core/Src/welder.c ****         torch_trigger = 0;
+ 1748              		.loc 1 619 120 discriminator 4 view .LVU454
+ 1749 0044 012A     		cmp	r2, #1
+ 1750 0046 E4D1     		bne	.L115
+ 1751 0048 F5E7     		b	.L114
+ 1752              	.L122:
+ 623:Core/Src/welder.c ****     return 0;
+ 1753              		.loc 1 623 60 discriminator 2 view .LVU455
+ 1754 004a 042B     		cmp	r3, #4
+ 1755 004c 02D0     		beq	.L116
+ 1756              		.loc 1 624 12 view .LVU456
+ 1757 004e 0020     		movs	r0, #0
+ 1758 0050 00E0     		b	.L116
+ 1759              	.L117:
+ 1760 0052 0020     		movs	r0, #0
+ 1761              	.L116:
+ 625:Core/Src/welder.c **** }
+ 1762              		.loc 1 625 1 view .LVU457
+ 1763 0054 08BD     		pop	{r3, pc}
+ 1764              	.L124:
+ 1765 0056 00BF     		.align	2
+ 1766              	.L123:
+ 1767 0058 00000000 		.word	trigger_type
+ 1768 005c 00000000 		.word	adc_buffer
+ 1769 0060 00000000 		.word	pedal_connected
+ 1770 0064 00040240 		.word	1073873920
+ 1771 0068 00000000 		.word	torch_trigger
+ 1772              		.cfi_endproc
+ 1773              	.LFE235:
+ 1775              		.section	.text.state_machine,"ax",%progbits
+ 1776              		.align	1
+ 1777              		.global	state_machine
+ 1778              		.syntax unified
+ 1779              		.thumb
+ 1780              		.thumb_func
+ 1782              	state_machine:
+ 1783              	.LFB225:
+ 318:Core/Src/welder.c ****     idle_menu();
+ 1784              		.loc 1 318 1 is_stmt 1 view -0
+ 1785              		.cfi_startproc
+ 1786              		@ args = 0, pretend = 0, frame = 0
+ 1787              		@ frame_needed = 0, uses_anonymous_args = 0
+ 1788 0000 38B5     		push	{r3, r4, r5, lr}
+ 1789              		.cfi_def_cfa_offset 16
+ 1790              		.cfi_offset 3, -16
+ 1791              		.cfi_offset 4, -12
+ 1792              		.cfi_offset 5, -8
+ 1793              		.cfi_offset 14, -4
+ARM GAS  /tmp/ccd93dhD.s 			page 48
+
+
+ 319:Core/Src/welder.c ****     uint16_t set_curr;
+ 1794              		.loc 1 319 5 view .LVU459
+ 1795 0002 FFF7FEFF 		bl	idle_menu
+ 1796              	.LVL136:
+ 320:Core/Src/welder.c ****     switch (state)
+ 1797              		.loc 1 320 5 view .LVU460
+ 321:Core/Src/welder.c ****     {
+ 1798              		.loc 1 321 5 view .LVU461
+ 1799 0006 854B     		ldr	r3, .L149
+ 1800 0008 1B78     		ldrb	r3, [r3]	@ zero_extendqisi2
+ 1801 000a 072B     		cmp	r3, #7
+ 1802 000c 00F20281 		bhi	.L126
+ 1803 0010 DFE813F0 		tbh	[pc, r3, lsl #1]
+ 1804              	.L128:
+ 1805 0014 0800     		.2byte	(.L135-.L128)/2
+ 1806 0016 2100     		.2byte	(.L134-.L128)/2
+ 1807 0018 5000     		.2byte	(.L133-.L128)/2
+ 1808 001a 7A00     		.2byte	(.L132-.L128)/2
+ 1809 001c A100     		.2byte	(.L131-.L128)/2
+ 1810 001e AA00     		.2byte	(.L130-.L128)/2
+ 1811 0020 CE00     		.2byte	(.L129-.L128)/2
+ 1812 0022 E600     		.2byte	(.L127-.L128)/2
+ 1813              		.p2align 1
+ 1814              	.L135:
+ 324:Core/Src/welder.c ****             state++;
+ 1815              		.loc 1 324 9 view .LVU462
+ 324:Core/Src/welder.c ****             state++;
+ 1816              		.loc 1 324 12 is_stmt 0 view .LVU463
+ 1817 0024 FFF7FEFF 		bl	start_condition
+ 1818              	.LVL137:
+ 324:Core/Src/welder.c ****             state++;
+ 1819              		.loc 1 324 11 discriminator 1 view .LVU464
+ 1820 0028 20B1     		cbz	r0, .L136
+ 325:Core/Src/welder.c ****         }
+ 1821              		.loc 1 325 13 is_stmt 1 view .LVU465
+ 325:Core/Src/welder.c ****         }
+ 1822              		.loc 1 325 18 is_stmt 0 view .LVU466
+ 1823 002a 7C4A     		ldr	r2, .L149
+ 1824 002c 1378     		ldrb	r3, [r2]	@ zero_extendqisi2
+ 1825 002e 0133     		adds	r3, r3, #1
+ 1826 0030 DBB2     		uxtb	r3, r3
+ 1827 0032 1370     		strb	r3, [r2]
+ 1828              	.L136:
+ 327:Core/Src/welder.c ****         HAL_GPIO_WritePin(IGNITION_GPIO_Port, IGNITION_Pin, GPIO_PIN_RESET);    // Disable igniter
+ 1829              		.loc 1 327 9 is_stmt 1 view .LVU467
+ 1830 0034 7A4C     		ldr	r4, .L149+4
+ 1831 0036 0022     		movs	r2, #0
+ 1832 0038 4FF40051 		mov	r1, #8192
+ 1833 003c 2046     		mov	r0, r4
+ 1834 003e FFF7FEFF 		bl	HAL_GPIO_WritePin
+ 1835              	.LVL138:
+ 328:Core/Src/welder.c ****         set_current(0);                                             // Set current to 0
+ 1836              		.loc 1 328 9 view .LVU468
+ 1837 0042 0022     		movs	r2, #0
+ 1838 0044 4FF48041 		mov	r1, #16384
+ 1839 0048 2046     		mov	r0, r4
+ 1840 004a FFF7FEFF 		bl	HAL_GPIO_WritePin
+ARM GAS  /tmp/ccd93dhD.s 			page 49
+
+
+ 1841              	.LVL139:
+ 329:Core/Src/welder.c ****         break;
+ 1842              		.loc 1 329 9 view .LVU469
+ 1843 004e 0020     		movs	r0, #0
+ 1844 0050 FFF7FEFF 		bl	set_current
+ 1845              	.LVL140:
+ 330:Core/Src/welder.c ****     case preflow:   
+ 1846              		.loc 1 330 9 view .LVU470
+ 1847              	.L125:
+ 417:Core/Src/welder.c **** 
+ 1848              		.loc 1 417 1 is_stmt 0 view .LVU471
+ 1849 0054 38BD     		pop	{r3, r4, r5, pc}
+ 1850              	.L134:
+ 332:Core/Src/welder.c ****             NB_Delay(0,1); // Reset non blocking delay
+ 1851              		.loc 1 332 9 is_stmt 1 view .LVU472
+ 332:Core/Src/welder.c ****             NB_Delay(0,1); // Reset non blocking delay
+ 1852              		.loc 1 332 12 is_stmt 0 view .LVU473
+ 1853 0056 FFF7FEFF 		bl	stop_condition
+ 1854              	.LVL141:
+ 332:Core/Src/welder.c ****             NB_Delay(0,1); // Reset non blocking delay
+ 1855              		.loc 1 332 11 discriminator 1 view .LVU474
+ 1856 005a 38B1     		cbz	r0, .L138
+ 333:Core/Src/welder.c ****             state = idle;
+ 1857              		.loc 1 333 13 is_stmt 1 view .LVU475
+ 1858 005c 0121     		movs	r1, #1
+ 1859 005e 0020     		movs	r0, #0
+ 1860 0060 FFF7FEFF 		bl	NB_Delay
+ 1861              	.LVL142:
+ 334:Core/Src/welder.c ****             break;
+ 1862              		.loc 1 334 13 view .LVU476
+ 334:Core/Src/welder.c ****             break;
+ 1863              		.loc 1 334 19 is_stmt 0 view .LVU477
+ 1864 0064 6D4B     		ldr	r3, .L149
+ 1865 0066 0022     		movs	r2, #0
+ 1866 0068 1A70     		strb	r2, [r3]
+ 335:Core/Src/welder.c ****         }
+ 1867              		.loc 1 335 13 is_stmt 1 view .LVU478
+ 1868 006a F3E7     		b	.L125
+ 1869              	.L138:
+ 337:Core/Src/welder.c ****         if(welding_mode & AC){
+ 1870              		.loc 1 337 9 view .LVU479
+ 1871 006c 0122     		movs	r2, #1
+ 1872 006e 4FF40051 		mov	r1, #8192
+ 1873 0072 6B48     		ldr	r0, .L149+4
+ 1874 0074 FFF7FEFF 		bl	HAL_GPIO_WritePin
+ 1875              	.LVL143:
+ 338:Core/Src/welder.c ****             set_pwm_frequency(ac_frequency);
+ 1876              		.loc 1 338 9 view .LVU480
+ 338:Core/Src/welder.c ****             set_pwm_frequency(ac_frequency);
+ 1877              		.loc 1 338 25 is_stmt 0 view .LVU481
+ 1878 0078 6A4B     		ldr	r3, .L149+8
+ 1879 007a 1B78     		ldrb	r3, [r3]	@ zero_extendqisi2
+ 338:Core/Src/welder.c ****             set_pwm_frequency(ac_frequency);
+ 1880              		.loc 1 338 11 view .LVU482
+ 1881 007c 13F0020F 		tst	r3, #2
+ 1882 0080 14D0     		beq	.L139
+ 339:Core/Src/welder.c ****             set_pwm_duty(ac_duty);
+ARM GAS  /tmp/ccd93dhD.s 			page 50
+
+
+ 1883              		.loc 1 339 13 is_stmt 1 view .LVU483
+ 1884 0082 694B     		ldr	r3, .L149+12
+ 1885 0084 1878     		ldrb	r0, [r3]	@ zero_extendqisi2
+ 1886 0086 FFF7FEFF 		bl	set_pwm_frequency
+ 1887              	.LVL144:
+ 340:Core/Src/welder.c ****         } else{
+ 1888              		.loc 1 340 13 view .LVU484
+ 1889 008a 684B     		ldr	r3, .L149+16
+ 1890 008c 1878     		ldrb	r0, [r3]	@ zero_extendqisi2
+ 1891 008e FFF7FEFF 		bl	set_pwm_duty
+ 1892              	.LVL145:
+ 1893              	.L140:
+ 344:Core/Src/welder.c ****             state++;
+ 1894              		.loc 1 344 9 view .LVU485
+ 344:Core/Src/welder.c ****             state++;
+ 1895              		.loc 1 344 12 is_stmt 0 view .LVU486
+ 1896 0092 0021     		movs	r1, #0
+ 1897 0094 664B     		ldr	r3, .L149+20
+ 1898 0096 1888     		ldrh	r0, [r3]
+ 1899 0098 FFF7FEFF 		bl	NB_Delay
+ 1900              	.LVL146:
+ 344:Core/Src/welder.c ****             state++;
+ 1901              		.loc 1 344 11 discriminator 1 view .LVU487
+ 1902 009c 0028     		cmp	r0, #0
+ 1903 009e D9D0     		beq	.L125
+ 345:Core/Src/welder.c ****         break;
+ 1904              		.loc 1 345 13 is_stmt 1 view .LVU488
+ 345:Core/Src/welder.c ****         break;
+ 1905              		.loc 1 345 18 is_stmt 0 view .LVU489
+ 1906 00a0 5E4A     		ldr	r2, .L149
+ 1907 00a2 1378     		ldrb	r3, [r2]	@ zero_extendqisi2
+ 1908 00a4 0133     		adds	r3, r3, #1
+ 1909 00a6 DBB2     		uxtb	r3, r3
+ 1910 00a8 1370     		strb	r3, [r2]
+ 1911 00aa D3E7     		b	.L125
+ 1912              	.L139:
+ 342:Core/Src/welder.c ****         }
+ 1913              		.loc 1 342 13 is_stmt 1 view .LVU490
+ 1914 00ac 0020     		movs	r0, #0
+ 1915 00ae FFF7FEFF 		bl	set_pwm_duty
+ 1916              	.LVL147:
+ 1917 00b2 EEE7     		b	.L140
+ 1918              	.L133:
+ 348:Core/Src/welder.c ****             NB_Delay(0,1);
+ 1919              		.loc 1 348 9 view .LVU491
+ 348:Core/Src/welder.c ****             NB_Delay(0,1);
+ 1920              		.loc 1 348 12 is_stmt 0 view .LVU492
+ 1921 00b4 FFF7FEFF 		bl	stop_condition
+ 1922              	.LVL148:
+ 348:Core/Src/welder.c ****             NB_Delay(0,1);
+ 1923              		.loc 1 348 11 discriminator 1 view .LVU493
+ 1924 00b8 38B1     		cbz	r0, .L141
+ 349:Core/Src/welder.c ****             state = idle;
+ 1925              		.loc 1 349 13 is_stmt 1 view .LVU494
+ 1926 00ba 0121     		movs	r1, #1
+ 1927 00bc 0020     		movs	r0, #0
+ 1928 00be FFF7FEFF 		bl	NB_Delay
+ARM GAS  /tmp/ccd93dhD.s 			page 51
+
+
+ 1929              	.LVL149:
+ 350:Core/Src/welder.c ****             break;
+ 1930              		.loc 1 350 13 view .LVU495
+ 350:Core/Src/welder.c ****             break;
+ 1931              		.loc 1 350 19 is_stmt 0 view .LVU496
+ 1932 00c2 564B     		ldr	r3, .L149
+ 1933 00c4 0022     		movs	r2, #0
+ 1934 00c6 1A70     		strb	r2, [r3]
+ 351:Core/Src/welder.c ****         }
+ 1935              		.loc 1 351 13 is_stmt 1 view .LVU497
+ 1936 00c8 C4E7     		b	.L125
+ 1937              	.L141:
+ 353:Core/Src/welder.c ****         set_current(ignition_current);                // Set low ignition current
+ 1938              		.loc 1 353 9 view .LVU498
+ 1939 00ca 0122     		movs	r2, #1
+ 1940 00cc 4FF48041 		mov	r1, #16384
+ 1941 00d0 5348     		ldr	r0, .L149+4
+ 1942 00d2 FFF7FEFF 		bl	HAL_GPIO_WritePin
+ 1943              	.LVL150:
+ 354:Core/Src/welder.c ****         if(NB_Delay(ignition_timeout,0)){
+ 1944              		.loc 1 354 9 view .LVU499
+ 1945 00d6 0520     		movs	r0, #5
+ 1946 00d8 FFF7FEFF 		bl	set_current
+ 1947              	.LVL151:
+ 355:Core/Src/welder.c ****             if(adc_buffer[1] >= current_threshold){
+ 1948              		.loc 1 355 9 view .LVU500
+ 355:Core/Src/welder.c ****             if(adc_buffer[1] >= current_threshold){
+ 1949              		.loc 1 355 12 is_stmt 0 view .LVU501
+ 1950 00dc 0021     		movs	r1, #0
+ 1951 00de 4FF4FA70 		mov	r0, #500
+ 1952 00e2 FFF7FEFF 		bl	NB_Delay
+ 1953              	.LVL152:
+ 355:Core/Src/welder.c ****             if(adc_buffer[1] >= current_threshold){
+ 1954              		.loc 1 355 11 discriminator 1 view .LVU502
+ 1955 00e6 0028     		cmp	r0, #0
+ 1956 00e8 B4D0     		beq	.L125
+ 356:Core/Src/welder.c ****                 state++;
+ 1957              		.loc 1 356 13 is_stmt 1 view .LVU503
+ 356:Core/Src/welder.c ****                 state++;
+ 1958              		.loc 1 356 26 is_stmt 0 view .LVU504
+ 1959 00ea 524B     		ldr	r3, .L149+24
+ 1960 00ec 5B68     		ldr	r3, [r3, #4]
+ 356:Core/Src/welder.c ****                 state++;
+ 1961              		.loc 1 356 15 view .LVU505
+ 1962 00ee B3F5967F 		cmp	r3, #300
+ 1963 00f2 05D3     		bcc	.L142
+ 357:Core/Src/welder.c ****             } else
+ 1964              		.loc 1 357 17 is_stmt 1 view .LVU506
+ 357:Core/Src/welder.c ****             } else
+ 1965              		.loc 1 357 22 is_stmt 0 view .LVU507
+ 1966 00f4 494A     		ldr	r2, .L149
+ 1967 00f6 1378     		ldrb	r3, [r2]	@ zero_extendqisi2
+ 1968 00f8 0133     		adds	r3, r3, #1
+ 1969 00fa DBB2     		uxtb	r3, r3
+ 1970 00fc 1370     		strb	r3, [r2]
+ 1971 00fe A9E7     		b	.L125
+ 1972              	.L142:
+ARM GAS  /tmp/ccd93dhD.s 			page 52
+
+
+ 359:Core/Src/welder.c ****         }
+ 1973              		.loc 1 359 17 is_stmt 1 view .LVU508
+ 359:Core/Src/welder.c ****         }
+ 1974              		.loc 1 359 23 is_stmt 0 view .LVU509
+ 1975 0100 464B     		ldr	r3, .L149
+ 1976 0102 0022     		movs	r2, #0
+ 1977 0104 1A70     		strb	r2, [r3]
+ 1978 0106 A5E7     		b	.L125
+ 1979              	.L132:
+ 363:Core/Src/welder.c ****             NB_Delay(0,1);
+ 1980              		.loc 1 363 9 is_stmt 1 view .LVU510
+ 363:Core/Src/welder.c ****             NB_Delay(0,1);
+ 1981              		.loc 1 363 12 is_stmt 0 view .LVU511
+ 1982 0108 FFF7FEFF 		bl	stop_condition
+ 1983              	.LVL153:
+ 363:Core/Src/welder.c ****             NB_Delay(0,1);
+ 1984              		.loc 1 363 11 discriminator 1 view .LVU512
+ 1985 010c 68B1     		cbz	r0, .L143
+ 364:Core/Src/welder.c ****             LinearTransition(0,0,0,1);
+ 1986              		.loc 1 364 13 is_stmt 1 view .LVU513
+ 1987 010e 0121     		movs	r1, #1
+ 1988 0110 0020     		movs	r0, #0
+ 1989 0112 FFF7FEFF 		bl	NB_Delay
+ 1990              	.LVL154:
+ 365:Core/Src/welder.c ****             state = crater;
+ 1991              		.loc 1 365 13 view .LVU514
+ 1992 0116 0123     		movs	r3, #1
+ 1993 0118 0022     		movs	r2, #0
+ 1994 011a 1146     		mov	r1, r2
+ 1995 011c 1046     		mov	r0, r2
+ 1996 011e FFF7FEFF 		bl	LinearTransition
+ 1997              	.LVL155:
+ 366:Core/Src/welder.c ****             break;
+ 1998              		.loc 1 366 13 view .LVU515
+ 366:Core/Src/welder.c ****             break;
+ 1999              		.loc 1 366 19 is_stmt 0 view .LVU516
+ 2000 0122 3E4B     		ldr	r3, .L149
+ 2001 0124 0622     		movs	r2, #6
+ 2002 0126 1A70     		strb	r2, [r3]
+ 367:Core/Src/welder.c ****         }
+ 2003              		.loc 1 367 13 is_stmt 1 view .LVU517
+ 2004 0128 94E7     		b	.L125
+ 2005              	.L143:
+ 369:Core/Src/welder.c ****         set_current(set_curr);
+ 2006              		.loc 1 369 9 view .LVU518
+ 369:Core/Src/welder.c ****         set_current(set_curr);
+ 2007              		.loc 1 369 20 is_stmt 0 view .LVU519
+ 2008 012a 434D     		ldr	r5, .L149+28
+ 2009 012c 0023     		movs	r3, #0
+ 2010 012e 434A     		ldr	r2, .L149+32
+ 2011 0130 1288     		ldrh	r2, [r2]
+ 2012 0132 2978     		ldrb	r1, [r5]	@ zero_extendqisi2
+ 2013 0134 4248     		ldr	r0, .L149+36
+ 2014 0136 0078     		ldrb	r0, [r0]	@ zero_extendqisi2
+ 2015 0138 FFF7FEFF 		bl	LinearTransition
+ 2016              	.LVL156:
+ 2017 013c 0446     		mov	r4, r0
+ARM GAS  /tmp/ccd93dhD.s 			page 53
+
+
+ 2018              	.LVL157:
+ 370:Core/Src/welder.c ****         if(set_curr == base_current)
+ 2019              		.loc 1 370 9 is_stmt 1 view .LVU520
+ 2020 013e C0B2     		uxtb	r0, r0
+ 2021              	.LVL158:
+ 370:Core/Src/welder.c ****         if(set_curr == base_current)
+ 2022              		.loc 1 370 9 is_stmt 0 view .LVU521
+ 2023 0140 FFF7FEFF 		bl	set_current
+ 2024              	.LVL159:
+ 371:Core/Src/welder.c ****             state++;
+ 2025              		.loc 1 371 9 is_stmt 1 view .LVU522
+ 371:Core/Src/welder.c ****             state++;
+ 2026              		.loc 1 371 21 is_stmt 0 view .LVU523
+ 2027 0144 2B78     		ldrb	r3, [r5]	@ zero_extendqisi2
+ 371:Core/Src/welder.c ****             state++;
+ 2028              		.loc 1 371 11 view .LVU524
+ 2029 0146 A342     		cmp	r3, r4
+ 2030 0148 84D1     		bne	.L125
+ 372:Core/Src/welder.c ****         break;
+ 2031              		.loc 1 372 13 is_stmt 1 view .LVU525
+ 372:Core/Src/welder.c ****         break;
+ 2032              		.loc 1 372 18 is_stmt 0 view .LVU526
+ 2033 014a 344A     		ldr	r2, .L149
+ 2034 014c 1378     		ldrb	r3, [r2]	@ zero_extendqisi2
+ 2035 014e 0133     		adds	r3, r3, #1
+ 2036 0150 DBB2     		uxtb	r3, r3
+ 2037 0152 1370     		strb	r3, [r2]
+ 2038 0154 7EE7     		b	.L125
+ 2039              	.LVL160:
+ 2040              	.L131:
+ 375:Core/Src/welder.c ****             state = downslope;
+ 2041              		.loc 1 375 9 is_stmt 1 view .LVU527
+ 375:Core/Src/welder.c ****             state = downslope;
+ 2042              		.loc 1 375 12 is_stmt 0 view .LVU528
+ 2043 0156 FFF7FEFF 		bl	stop_condition
+ 2044              	.LVL161:
+ 375:Core/Src/welder.c ****             state = downslope;
+ 2045              		.loc 1 375 11 discriminator 1 view .LVU529
+ 2046 015a 10B1     		cbz	r0, .L144
+ 376:Core/Src/welder.c ****         }
+ 2047              		.loc 1 376 13 is_stmt 1 view .LVU530
+ 376:Core/Src/welder.c ****         }
+ 2048              		.loc 1 376 19 is_stmt 0 view .LVU531
+ 2049 015c 2F4B     		ldr	r3, .L149
+ 2050 015e 0522     		movs	r2, #5
+ 2051 0160 1A70     		strb	r2, [r3]
+ 2052              	.L144:
+ 378:Core/Src/welder.c ****         break;
+ 2053              		.loc 1 378 9 is_stmt 1 view .LVU532
+ 2054 0162 FFF7FEFF 		bl	weld
+ 2055              	.LVL162:
+ 379:Core/Src/welder.c ****     case downslope:
+ 2056              		.loc 1 379 9 view .LVU533
+ 2057 0166 75E7     		b	.L125
+ 2058              	.L130:
+ 381:Core/Src/welder.c ****             LinearTransition(0,0,0,1);
+ 2059              		.loc 1 381 9 view .LVU534
+ARM GAS  /tmp/ccd93dhD.s 			page 54
+
+
+ 381:Core/Src/welder.c ****             LinearTransition(0,0,0,1);
+ 2060              		.loc 1 381 12 is_stmt 0 view .LVU535
+ 2061 0168 FFF7FEFF 		bl	start_condition
+ 2062              	.LVL163:
+ 381:Core/Src/welder.c ****             LinearTransition(0,0,0,1);
+ 2063              		.loc 1 381 11 discriminator 1 view .LVU536
+ 2064 016c 48B1     		cbz	r0, .L145
+ 382:Core/Src/welder.c ****             state = welding;
+ 2065              		.loc 1 382 13 is_stmt 1 view .LVU537
+ 2066 016e 0123     		movs	r3, #1
+ 2067 0170 0022     		movs	r2, #0
+ 2068 0172 1146     		mov	r1, r2
+ 2069 0174 1046     		mov	r0, r2
+ 2070 0176 FFF7FEFF 		bl	LinearTransition
+ 2071              	.LVL164:
+ 383:Core/Src/welder.c ****             break;
+ 2072              		.loc 1 383 13 view .LVU538
+ 383:Core/Src/welder.c ****             break;
+ 2073              		.loc 1 383 19 is_stmt 0 view .LVU539
+ 2074 017a 284B     		ldr	r3, .L149
+ 2075 017c 0422     		movs	r2, #4
+ 2076 017e 1A70     		strb	r2, [r3]
+ 384:Core/Src/welder.c ****         }
+ 2077              		.loc 1 384 13 is_stmt 1 view .LVU540
+ 2078 0180 68E7     		b	.L125
+ 2079              	.L145:
+ 387:Core/Src/welder.c ****         set_current(set_curr);
+ 2080              		.loc 1 387 9 view .LVU541
+ 387:Core/Src/welder.c ****         set_current(set_curr);
+ 2081              		.loc 1 387 20 is_stmt 0 view .LVU542
+ 2082 0182 304D     		ldr	r5, .L149+40
+ 2083 0184 0023     		movs	r3, #0
+ 2084 0186 304A     		ldr	r2, .L149+44
+ 2085 0188 1288     		ldrh	r2, [r2]
+ 2086 018a 2978     		ldrb	r1, [r5]	@ zero_extendqisi2
+ 2087 018c 2A48     		ldr	r0, .L149+28
+ 2088 018e 0078     		ldrb	r0, [r0]	@ zero_extendqisi2
+ 2089 0190 FFF7FEFF 		bl	LinearTransition
+ 2090              	.LVL165:
+ 2091 0194 0446     		mov	r4, r0
+ 2092              	.LVL166:
+ 388:Core/Src/welder.c ****         if(set_curr == crater_current)
+ 2093              		.loc 1 388 9 is_stmt 1 view .LVU543
+ 2094 0196 C0B2     		uxtb	r0, r0
+ 2095              	.LVL167:
+ 388:Core/Src/welder.c ****         if(set_curr == crater_current)
+ 2096              		.loc 1 388 9 is_stmt 0 view .LVU544
+ 2097 0198 FFF7FEFF 		bl	set_current
+ 2098              	.LVL168:
+ 389:Core/Src/welder.c ****             state++;
+ 2099              		.loc 1 389 9 is_stmt 1 view .LVU545
+ 389:Core/Src/welder.c ****             state++;
+ 2100              		.loc 1 389 21 is_stmt 0 view .LVU546
+ 2101 019c 2B78     		ldrb	r3, [r5]	@ zero_extendqisi2
+ 389:Core/Src/welder.c ****             state++;
+ 2102              		.loc 1 389 11 view .LVU547
+ 2103 019e A342     		cmp	r3, r4
+ARM GAS  /tmp/ccd93dhD.s 			page 55
+
+
+ 2104 01a0 7FF458AF 		bne	.L125
+ 390:Core/Src/welder.c ****         break;
+ 2105              		.loc 1 390 13 is_stmt 1 view .LVU548
+ 390:Core/Src/welder.c ****         break;
+ 2106              		.loc 1 390 18 is_stmt 0 view .LVU549
+ 2107 01a4 1D4A     		ldr	r2, .L149
+ 2108 01a6 1378     		ldrb	r3, [r2]	@ zero_extendqisi2
+ 2109 01a8 0133     		adds	r3, r3, #1
+ 2110 01aa DBB2     		uxtb	r3, r3
+ 2111 01ac 1370     		strb	r3, [r2]
+ 2112 01ae 51E7     		b	.L125
+ 2113              	.LVL169:
+ 2114              	.L129:
+ 393:Core/Src/welder.c ****             NB_Delay(0,1);
+ 2115              		.loc 1 393 9 is_stmt 1 view .LVU550
+ 393:Core/Src/welder.c ****             NB_Delay(0,1);
+ 2116              		.loc 1 393 12 is_stmt 0 view .LVU551
+ 2117 01b0 FFF7FEFF 		bl	start_condition
+ 2118              	.LVL170:
+ 393:Core/Src/welder.c ****             NB_Delay(0,1);
+ 2119              		.loc 1 393 11 discriminator 1 view .LVU552
+ 2120 01b4 38B1     		cbz	r0, .L146
+ 394:Core/Src/welder.c ****             state = upslope;
+ 2121              		.loc 1 394 13 is_stmt 1 view .LVU553
+ 2122 01b6 0121     		movs	r1, #1
+ 2123 01b8 0020     		movs	r0, #0
+ 2124 01ba FFF7FEFF 		bl	NB_Delay
+ 2125              	.LVL171:
+ 395:Core/Src/welder.c ****             break;
+ 2126              		.loc 1 395 13 view .LVU554
+ 395:Core/Src/welder.c ****             break;
+ 2127              		.loc 1 395 19 is_stmt 0 view .LVU555
+ 2128 01be 174B     		ldr	r3, .L149
+ 2129 01c0 0322     		movs	r2, #3
+ 2130 01c2 1A70     		strb	r2, [r3]
+ 396:Core/Src/welder.c ****         }
+ 2131              		.loc 1 396 13 is_stmt 1 view .LVU556
+ 2132 01c4 46E7     		b	.L125
+ 2133              	.L146:
+ 398:Core/Src/welder.c ****             state ++;
+ 2134              		.loc 1 398 9 view .LVU557
+ 398:Core/Src/welder.c ****             state ++;
+ 2135              		.loc 1 398 12 is_stmt 0 view .LVU558
+ 2136 01c6 0021     		movs	r1, #0
+ 2137 01c8 6420     		movs	r0, #100
+ 2138 01ca FFF7FEFF 		bl	NB_Delay
+ 2139              	.LVL172:
+ 398:Core/Src/welder.c ****             state ++;
+ 2140              		.loc 1 398 11 discriminator 1 view .LVU559
+ 2141 01ce 0028     		cmp	r0, #0
+ 2142 01d0 3FF440AF 		beq	.L125
+ 399:Core/Src/welder.c ****         break;
+ 2143              		.loc 1 399 13 is_stmt 1 view .LVU560
+ 399:Core/Src/welder.c ****         break;
+ 2144              		.loc 1 399 19 is_stmt 0 view .LVU561
+ 2145 01d4 114A     		ldr	r2, .L149
+ 2146 01d6 1378     		ldrb	r3, [r2]	@ zero_extendqisi2
+ARM GAS  /tmp/ccd93dhD.s 			page 56
+
+
+ 2147 01d8 0133     		adds	r3, r3, #1
+ 2148 01da DBB2     		uxtb	r3, r3
+ 2149 01dc 1370     		strb	r3, [r2]
+ 2150 01de 39E7     		b	.L125
+ 2151              	.L127:
+ 402:Core/Src/welder.c ****             NB_Delay(0,1);
+ 2152              		.loc 1 402 9 is_stmt 1 view .LVU562
+ 402:Core/Src/welder.c ****             NB_Delay(0,1);
+ 2153              		.loc 1 402 12 is_stmt 0 view .LVU563
+ 2154 01e0 FFF7FEFF 		bl	start_condition
+ 2155              	.LVL173:
+ 402:Core/Src/welder.c ****             NB_Delay(0,1);
+ 2156              		.loc 1 402 11 discriminator 1 view .LVU564
+ 2157 01e4 38B1     		cbz	r0, .L147
+ 403:Core/Src/welder.c ****             state = ignition;
+ 2158              		.loc 1 403 13 is_stmt 1 view .LVU565
+ 2159 01e6 0121     		movs	r1, #1
+ 2160 01e8 0020     		movs	r0, #0
+ 2161 01ea FFF7FEFF 		bl	NB_Delay
+ 2162              	.LVL174:
+ 404:Core/Src/welder.c ****             break;
+ 2163              		.loc 1 404 13 view .LVU566
+ 404:Core/Src/welder.c ****             break;
+ 2164              		.loc 1 404 19 is_stmt 0 view .LVU567
+ 2165 01ee 0B4B     		ldr	r3, .L149
+ 2166 01f0 0222     		movs	r2, #2
+ 2167 01f2 1A70     		strb	r2, [r3]
+ 405:Core/Src/welder.c ****         }
+ 2168              		.loc 1 405 13 is_stmt 1 view .LVU568
+ 2169 01f4 2EE7     		b	.L125
+ 2170              	.L147:
+ 407:Core/Src/welder.c ****         if(NB_Delay(postflow_time,0))
+ 2171              		.loc 1 407 9 view .LVU569
+ 2172 01f6 0020     		movs	r0, #0
+ 2173 01f8 FFF7FEFF 		bl	set_current
+ 2174              	.LVL175:
+ 408:Core/Src/welder.c ****             state = idle;
+ 2175              		.loc 1 408 9 view .LVU570
+ 408:Core/Src/welder.c ****             state = idle;
+ 2176              		.loc 1 408 12 is_stmt 0 view .LVU571
+ 2177 01fc 0021     		movs	r1, #0
+ 2178 01fe 134B     		ldr	r3, .L149+48
+ 2179 0200 1888     		ldrh	r0, [r3]
+ 2180 0202 FFF7FEFF 		bl	NB_Delay
+ 2181              	.LVL176:
+ 408:Core/Src/welder.c ****             state = idle;
+ 2182              		.loc 1 408 11 discriminator 1 view .LVU572
+ 2183 0206 0028     		cmp	r0, #0
+ 2184 0208 3FF424AF 		beq	.L125
+ 409:Core/Src/welder.c ****         break;
+ 2185              		.loc 1 409 13 is_stmt 1 view .LVU573
+ 409:Core/Src/welder.c ****         break;
+ 2186              		.loc 1 409 19 is_stmt 0 view .LVU574
+ 2187 020c 034B     		ldr	r3, .L149
+ 2188 020e 0022     		movs	r2, #0
+ 2189 0210 1A70     		strb	r2, [r3]
+ 2190 0212 1FE7     		b	.L125
+ARM GAS  /tmp/ccd93dhD.s 			page 57
+
+
+ 2191              	.L126:
+ 414:Core/Src/welder.c ****         break;
+ 2192              		.loc 1 414 9 is_stmt 1 view .LVU575
+ 414:Core/Src/welder.c ****         break;
+ 2193              		.loc 1 414 15 is_stmt 0 view .LVU576
+ 2194 0214 014B     		ldr	r3, .L149
+ 2195 0216 0022     		movs	r2, #0
+ 2196 0218 1A70     		strb	r2, [r3]
+ 415:Core/Src/welder.c ****     }
+ 2197              		.loc 1 415 9 is_stmt 1 view .LVU577
+ 417:Core/Src/welder.c **** 
+ 2198              		.loc 1 417 1 is_stmt 0 view .LVU578
+ 2199 021a 1BE7     		b	.L125
+ 2200              	.L150:
+ 2201              		.align	2
+ 2202              	.L149:
+ 2203 021c 00000000 		.word	state
+ 2204 0220 00080240 		.word	1073874944
+ 2205 0224 00000000 		.word	welding_mode
+ 2206 0228 00000000 		.word	ac_frequency
+ 2207 022c 00000000 		.word	ac_duty
+ 2208 0230 00000000 		.word	preflow_time
+ 2209 0234 00000000 		.word	adc_buffer
+ 2210 0238 00000000 		.word	base_current
+ 2211 023c 00000000 		.word	upslope_time
+ 2212 0240 00000000 		.word	start_current
+ 2213 0244 00000000 		.word	crater_current
+ 2214 0248 00000000 		.word	downslope_time
+ 2215 024c 00000000 		.word	postflow_time
+ 2216              		.cfi_endproc
+ 2217              	.LFE225:
+ 2219              		.section	.text.welder,"ax",%progbits
+ 2220              		.align	1
+ 2221              		.global	welder
+ 2222              		.syntax unified
+ 2223              		.thumb
+ 2224              		.thumb_func
+ 2226              	welder:
+ 2227              	.LFB223:
+  81:Core/Src/welder.c ****     preflow_time = 1200;
+ 2228              		.loc 1 81 1 is_stmt 1 view -0
+ 2229              		.cfi_startproc
+ 2230              		@ Volatile: function does not return.
+ 2231              		@ args = 0, pretend = 0, frame = 0
+ 2232              		@ frame_needed = 0, uses_anonymous_args = 0
+ 2233 0000 80B5     		push	{r7, lr}
+ 2234              		.cfi_def_cfa_offset 8
+ 2235              		.cfi_offset 7, -8
+ 2236              		.cfi_offset 14, -4
+ 2237 0002 82B0     		sub	sp, sp, #8
+ 2238              		.cfi_def_cfa_offset 16
+  82:Core/Src/welder.c ****     postflow_time = 2000;
+ 2239              		.loc 1 82 5 view .LVU580
+  82:Core/Src/welder.c ****     postflow_time = 2000;
+ 2240              		.loc 1 82 18 is_stmt 0 view .LVU581
+ 2241 0004 374B     		ldr	r3, .L154
+ 2242 0006 4FF49662 		mov	r2, #1200
+ARM GAS  /tmp/ccd93dhD.s 			page 58
+
+
+ 2243 000a 1A80     		strh	r2, [r3]	@ movhi
+  83:Core/Src/welder.c ****     upslope_time = 3000;
+ 2244              		.loc 1 83 5 is_stmt 1 view .LVU582
+  83:Core/Src/welder.c ****     upslope_time = 3000;
+ 2245              		.loc 1 83 19 is_stmt 0 view .LVU583
+ 2246 000c 364B     		ldr	r3, .L154+4
+ 2247 000e 4FF4FA62 		mov	r2, #2000
+ 2248 0012 1A80     		strh	r2, [r3]	@ movhi
+  84:Core/Src/welder.c ****     downslope_time = 3000;
+ 2249              		.loc 1 84 5 is_stmt 1 view .LVU584
+  84:Core/Src/welder.c ****     downslope_time = 3000;
+ 2250              		.loc 1 84 18 is_stmt 0 view .LVU585
+ 2251 0014 40F6B833 		movw	r3, #3000
+ 2252 0018 344A     		ldr	r2, .L154+8
+ 2253 001a 1380     		strh	r3, [r2]	@ movhi
+  85:Core/Src/welder.c ****     start_current = 5;
+ 2254              		.loc 1 85 5 is_stmt 1 view .LVU586
+  85:Core/Src/welder.c ****     start_current = 5;
+ 2255              		.loc 1 85 20 is_stmt 0 view .LVU587
+ 2256 001c 344A     		ldr	r2, .L154+12
+ 2257 001e 1380     		strh	r3, [r2]	@ movhi
+  86:Core/Src/welder.c ****     base_current = 200;
+ 2258              		.loc 1 86 5 is_stmt 1 view .LVU588
+  86:Core/Src/welder.c ****     base_current = 200;
+ 2259              		.loc 1 86 19 is_stmt 0 view .LVU589
+ 2260 0020 0523     		movs	r3, #5
+ 2261 0022 344A     		ldr	r2, .L154+16
+ 2262 0024 1370     		strb	r3, [r2]
+  87:Core/Src/welder.c ****     background_current = 120;
+ 2263              		.loc 1 87 5 is_stmt 1 view .LVU590
+  87:Core/Src/welder.c ****     background_current = 120;
+ 2264              		.loc 1 87 18 is_stmt 0 view .LVU591
+ 2265 0026 344A     		ldr	r2, .L154+20
+ 2266 0028 C821     		movs	r1, #200
+ 2267 002a 1170     		strb	r1, [r2]
+  88:Core/Src/welder.c ****     crater_current = 5;
+ 2268              		.loc 1 88 5 is_stmt 1 view .LVU592
+  88:Core/Src/welder.c ****     crater_current = 5;
+ 2269              		.loc 1 88 24 is_stmt 0 view .LVU593
+ 2270 002c 334A     		ldr	r2, .L154+24
+ 2271 002e 7821     		movs	r1, #120
+ 2272 0030 1170     		strb	r1, [r2]
+  89:Core/Src/welder.c ****     pedal_connected = 1;
+ 2273              		.loc 1 89 5 is_stmt 1 view .LVU594
+  89:Core/Src/welder.c ****     pedal_connected = 1;
+ 2274              		.loc 1 89 20 is_stmt 0 view .LVU595
+ 2275 0032 334A     		ldr	r2, .L154+28
+ 2276 0034 1370     		strb	r3, [r2]
+  90:Core/Src/welder.c **** 
+ 2277              		.loc 1 90 5 is_stmt 1 view .LVU596
+  90:Core/Src/welder.c **** 
+ 2278              		.loc 1 90 21 is_stmt 0 view .LVU597
+ 2279 0036 0125     		movs	r5, #1
+ 2280 0038 324B     		ldr	r3, .L154+32
+ 2281 003a 1D70     		strb	r5, [r3]
+  92:Core/Src/welder.c ****     welding_mode |= AC;
+ 2282              		.loc 1 92 5 is_stmt 1 view .LVU598
+ARM GAS  /tmp/ccd93dhD.s 			page 59
+
+
+  92:Core/Src/welder.c ****     welding_mode |= AC;
+ 2283              		.loc 1 92 18 is_stmt 0 view .LVU599
+ 2284 003c 324A     		ldr	r2, .L154+36
+ 2285 003e 1378     		ldrb	r3, [r2]	@ zero_extendqisi2
+ 2286 0040 43F00401 		orr	r1, r3, #4
+ 2287 0044 1170     		strb	r1, [r2]
+  93:Core/Src/welder.c ****     // welding_mode |= DC;
+ 2288              		.loc 1 93 5 is_stmt 1 view .LVU600
+  93:Core/Src/welder.c ****     // welding_mode |= DC;
+ 2289              		.loc 1 93 18 is_stmt 0 view .LVU601
+ 2290 0046 43F00603 		orr	r3, r3, #6
+ 2291 004a 1370     		strb	r3, [r2]
+  95:Core/Src/welder.c ****     pulse_frequency = 3;
+ 2292              		.loc 1 95 5 is_stmt 1 view .LVU602
+  95:Core/Src/welder.c ****     pulse_frequency = 3;
+ 2293              		.loc 1 95 16 is_stmt 0 view .LVU603
+ 2294 004c 2F4B     		ldr	r3, .L154+40
+ 2295 004e 1422     		movs	r2, #20
+ 2296 0050 1A70     		strb	r2, [r3]
+  96:Core/Src/welder.c **** 
+ 2297              		.loc 1 96 5 is_stmt 1 view .LVU604
+  96:Core/Src/welder.c **** 
+ 2298              		.loc 1 96 21 is_stmt 0 view .LVU605
+ 2299 0052 2F4B     		ldr	r3, .L154+44
+ 2300 0054 2F4A     		ldr	r2, .L154+48
+ 2301 0056 1A60     		str	r2, [r3]	@ float
+  98:Core/Src/welder.c ****     ac_duty = 70;
+ 2302              		.loc 1 98 5 is_stmt 1 view .LVU606
+  98:Core/Src/welder.c ****     ac_duty = 70;
+ 2303              		.loc 1 98 18 is_stmt 0 view .LVU607
+ 2304 0058 2F4E     		ldr	r6, .L154+52
+ 2305 005a 6423     		movs	r3, #100
+ 2306 005c 3370     		strb	r3, [r6]
+  99:Core/Src/welder.c **** 
+ 2307              		.loc 1 99 5 is_stmt 1 view .LVU608
+  99:Core/Src/welder.c **** 
+ 2308              		.loc 1 99 13 is_stmt 0 view .LVU609
+ 2309 005e 2F4B     		ldr	r3, .L154+56
+ 2310 0060 4622     		movs	r2, #70
+ 2311 0062 1A70     		strb	r2, [r3]
+ 102:Core/Src/welder.c ****     // Initialize the PCF8574 with the desired address (A0 = 0, A1 = 0, A2 = 0)
+ 2312              		.loc 1 102 5 is_stmt 1 view .LVU610
+ 2313 0064 2A46     		mov	r2, r5
+ 2314 0066 4FF40051 		mov	r1, #8192
+ 2315 006a 2D48     		ldr	r0, .L154+60
+ 2316 006c FFF7FEFF 		bl	HAL_GPIO_WritePin
+ 2317              	.LVL177:
+ 104:Core/Src/welder.c ****     PCF8574_Init(&pcf8574_2, &hi2c1, 0, 0, 1);
+ 2318              		.loc 1 104 5 view .LVU611
+ 2319 0070 DFF8C890 		ldr	r9, .L154+88
+ 2320 0074 DFF8C880 		ldr	r8, .L154+92
+ 2321 0078 0024     		movs	r4, #0
+ 2322 007a 0094     		str	r4, [sp]
+ 2323 007c 2346     		mov	r3, r4
+ 2324 007e 2246     		mov	r2, r4
+ 2325 0080 4946     		mov	r1, r9
+ 2326 0082 4046     		mov	r0, r8
+ARM GAS  /tmp/ccd93dhD.s 			page 60
+
+
+ 2327 0084 FFF7FEFF 		bl	PCF8574_Init
+ 2328              	.LVL178:
+ 105:Core/Src/welder.c **** 
+ 2329              		.loc 1 105 5 view .LVU612
+ 2330 0088 264F     		ldr	r7, .L154+64
+ 2331 008a 0095     		str	r5, [sp]
+ 2332 008c 2346     		mov	r3, r4
+ 2333 008e 2246     		mov	r2, r4
+ 2334 0090 4946     		mov	r1, r9
+ 2335 0092 3846     		mov	r0, r7
+ 2336 0094 FFF7FEFF 		bl	PCF8574_Init
+ 2337              	.LVL179:
+ 107:Core/Src/welder.c ****     PCF8574_WritePort(&pcf8574_2, 0x00);
+ 2338              		.loc 1 107 5 view .LVU613
+ 2339 0098 2146     		mov	r1, r4
+ 2340 009a 4046     		mov	r0, r8
+ 2341 009c FFF7FEFF 		bl	PCF8574_WritePort
+ 2342              	.LVL180:
+ 108:Core/Src/welder.c **** 
+ 2343              		.loc 1 108 5 view .LVU614
+ 2344 00a0 2146     		mov	r1, r4
+ 2345 00a2 3846     		mov	r0, r7
+ 2346 00a4 FFF7FEFF 		bl	PCF8574_WritePort
+ 2347              	.LVL181:
+ 110:Core/Src/welder.c ****     ssd1306_Fill(0);
+ 2348              		.loc 1 110 5 view .LVU615
+ 2349 00a8 FFF7FEFF 		bl	ssd1306_Init
+ 2350              	.LVL182:
+ 111:Core/Src/welder.c ****     ssd1306_UpdateScreen();
+ 2351              		.loc 1 111 5 view .LVU616
+ 2352 00ac 2046     		mov	r0, r4
+ 2353 00ae FFF7FEFF 		bl	ssd1306_Fill
+ 2354              	.LVL183:
+ 112:Core/Src/welder.c **** 
+ 2355              		.loc 1 112 5 view .LVU617
+ 2356 00b2 FFF7FEFF 		bl	ssd1306_UpdateScreen
+ 2357              	.LVL184:
+ 114:Core/Src/welder.c **** 
+ 2358              		.loc 1 114 5 view .LVU618
+ 2359 00b6 3C21     		movs	r1, #60
+ 2360 00b8 1B48     		ldr	r0, .L154+68
+ 2361 00ba FFF7FEFF 		bl	HAL_TIM_Encoder_Start
+ 2362              	.LVL185:
+ 116:Core/Src/welder.c **** 
+ 2363              		.loc 1 116 5 view .LVU619
+ 2364 00be 0222     		movs	r2, #2
+ 2365 00c0 1A49     		ldr	r1, .L154+72
+ 2366 00c2 1B48     		ldr	r0, .L154+76
+ 2367 00c4 FFF7FEFF 		bl	HAL_ADC_Start_DMA
+ 2368              	.LVL186:
+ 119:Core/Src/welder.c ****     HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_4);
+ 2369              		.loc 1 119 5 view .LVU620
+ 2370 00c8 3078     		ldrb	r0, [r6]	@ zero_extendqisi2
+ 2371 00ca FFF7FEFF 		bl	set_pwm_frequency
+ 2372              	.LVL187:
+ 120:Core/Src/welder.c ****     // HAL_TIM_PWM_Start_IT(pwm_tim, TIM_CHANNEL_1);
+ 2373              		.loc 1 120 5 view .LVU621
+ARM GAS  /tmp/ccd93dhD.s 			page 61
+
+
+ 2374 00ce 0C21     		movs	r1, #12
+ 2375 00d0 1848     		ldr	r0, .L154+80
+ 2376 00d2 FFF7FEFF 		bl	HAL_TIM_PWM_Start
+ 2377              	.LVL188:
+ 122:Core/Src/welder.c **** 
+ 2378              		.loc 1 122 5 view .LVU622
+ 2379 00d6 1848     		ldr	r0, .L154+84
+ 2380 00d8 FFF7FEFF 		bl	HAL_TIM_Base_Start_IT
+ 2381              	.LVL189:
+ 2382              	.L152:
+ 124:Core/Src/welder.c ****     {
+ 2383              		.loc 1 124 5 view .LVU623
+ 126:Core/Src/welder.c ****     }
+ 2384              		.loc 1 126 9 discriminator 1 view .LVU624
+ 2385 00dc FFF7FEFF 		bl	state_machine
+ 2386              	.LVL190:
+ 124:Core/Src/welder.c ****     {
+ 2387              		.loc 1 124 11 view .LVU625
+ 2388 00e0 FCE7     		b	.L152
+ 2389              	.L155:
+ 2390 00e2 00BF     		.align	2
+ 2391              	.L154:
+ 2392 00e4 00000000 		.word	preflow_time
+ 2393 00e8 00000000 		.word	postflow_time
+ 2394 00ec 00000000 		.word	upslope_time
+ 2395 00f0 00000000 		.word	downslope_time
+ 2396 00f4 00000000 		.word	start_current
+ 2397 00f8 00000000 		.word	base_current
+ 2398 00fc 00000000 		.word	background_current
+ 2399 0100 00000000 		.word	crater_current
+ 2400 0104 00000000 		.word	pedal_connected
+ 2401 0108 00000000 		.word	welding_mode
+ 2402 010c 00000000 		.word	pulse_duty
+ 2403 0110 00000000 		.word	pulse_frequency
+ 2404 0114 00004040 		.word	1077936128
+ 2405 0118 00000000 		.word	ac_frequency
+ 2406 011c 00000000 		.word	ac_duty
+ 2407 0120 00080240 		.word	1073874944
+ 2408 0124 00000000 		.word	pcf8574_2
+ 2409 0128 00000000 		.word	htim2
+ 2410 012c 00000000 		.word	adc_buffer
+ 2411 0130 00000000 		.word	hadc1
+ 2412 0134 00000000 		.word	htim4
+ 2413 0138 00000000 		.word	htim11
+ 2414 013c 00000000 		.word	hi2c1
+ 2415 0140 00000000 		.word	pcf8574_1
+ 2416              		.cfi_endproc
+ 2417              	.LFE223:
+ 2419              		.section	.bss.startTime.0,"aw",%nobits
+ 2420              		.align	2
+ 2423              	startTime.0:
+ 2424 0000 00000000 		.space	4
+ 2425              		.section	.bss.started.1,"aw",%nobits
+ 2428              	started.1:
+ 2429 0000 00       		.space	1
+ 2430              		.section	.bss.etrig.2,"aw",%nobits
+ 2433              	etrig.2:
+ARM GAS  /tmp/ccd93dhD.s 			page 62
+
+
+ 2434 0000 00       		.space	1
+ 2435              		.section	.bss.ttrig.3,"aw",%nobits
+ 2438              	ttrig.3:
+ 2439 0000 00       		.space	1
+ 2440              		.section	.bss.startTime.4,"aw",%nobits
+ 2441              		.align	2
+ 2444              	startTime.4:
+ 2445 0000 00000000 		.space	4
+ 2446              		.section	.bss.started.5,"aw",%nobits
+ 2449              	started.5:
+ 2450 0000 00       		.space	1
+ 2451              		.section	.bss.prev_millis.6,"aw",%nobits
+ 2452              		.align	2
+ 2455              	prev_millis.6:
+ 2456 0000 00000000 		.space	4
+ 2457              		.section	.bss.set_curr.7,"aw",%nobits
+ 2458              		.align	1
+ 2461              	set_curr.7:
+ 2462 0000 0000     		.space	2
+ 2463              		.section	.data.i.8,"aw"
+ 2464              		.align	2
+ 2467              	i.8:
+ 2468 0000 01000000 		.word	1
+ 2469              		.section	.bss.enc_last.9,"aw",%nobits
+ 2470              		.align	1
+ 2473              	enc_last.9:
+ 2474 0000 0000     		.space	2
+ 2475              		.section	.bss.set.10,"aw",%nobits
+ 2478              	set.10:
+ 2479 0000 00       		.space	1
+ 2480              		.section	.bss.last_millis.11,"aw",%nobits
+ 2481              		.align	2
+ 2484              	last_millis.11:
+ 2485 0000 00000000 		.space	4
+ 2486              		.section	.bss.menu.12,"aw",%nobits
+ 2489              	menu.12:
+ 2490 0000 00       		.space	1
+ 2491              		.global	pcf8574_2
+ 2492              		.section	.bss.pcf8574_2,"aw",%nobits
+ 2493              		.align	2
+ 2496              	pcf8574_2:
+ 2497 0000 00000000 		.space	8
+ 2497      00000000 
+ 2498              		.global	pcf8574_1
+ 2499              		.section	.bss.pcf8574_1,"aw",%nobits
+ 2500              		.align	2
+ 2503              	pcf8574_1:
+ 2504 0000 00000000 		.space	8
+ 2504      00000000 
+ 2505              		.global	state
+ 2506              		.section	.bss.state,"aw",%nobits
+ 2509              	state:
+ 2510 0000 00       		.space	1
+ 2511              		.global	welding_mode
+ 2512              		.section	.bss.welding_mode,"aw",%nobits
+ 2515              	welding_mode:
+ 2516 0000 00       		.space	1
+ARM GAS  /tmp/ccd93dhD.s 			page 63
+
+
+ 2517              		.global	trigger_type
+ 2518              		.section	.data.trigger_type,"aw"
+ 2521              	trigger_type:
+ 2522 0000 04       		.byte	4
+ 2523              		.global	deb_prev_millis
+ 2524              		.section	.bss.deb_prev_millis,"aw",%nobits
+ 2525              		.align	2
+ 2528              	deb_prev_millis:
+ 2529 0000 00000000 		.space	4
+ 2530              		.global	deb_current_millis
+ 2531              		.section	.bss.deb_current_millis,"aw",%nobits
+ 2532              		.align	2
+ 2535              	deb_current_millis:
+ 2536 0000 00000000 		.space	4
+ 2537              		.global	start_tick
+ 2538              		.section	.bss.start_tick,"aw",%nobits
+ 2539              		.align	2
+ 2542              	start_tick:
+ 2543 0000 00000000 		.space	4
+ 2544              		.global	adc_buffer
+ 2545              		.section	.bss.adc_buffer,"aw",%nobits
+ 2546              		.align	2
+ 2549              	adc_buffer:
+ 2550 0000 00000000 		.space	8
+ 2550      00000000 
+ 2551              		.global	pedal_connected
+ 2552              		.section	.bss.pedal_connected,"aw",%nobits
+ 2555              	pedal_connected:
+ 2556 0000 00       		.space	1
+ 2557              		.global	encoder_button
+ 2558              		.section	.bss.encoder_button,"aw",%nobits
+ 2561              	encoder_button:
+ 2562 0000 00       		.space	1
+ 2563              		.global	torch_trigger
+ 2564              		.section	.bss.torch_trigger,"aw",%nobits
+ 2567              	torch_trigger:
+ 2568 0000 00       		.space	1
+ 2569              		.global	crater_time
+ 2570              		.section	.rodata.crater_time,"a"
+ 2571              		.align	1
+ 2574              	crater_time:
+ 2575 0000 6400     		.short	100
+ 2576              		.global	ignition_current
+ 2577              		.section	.rodata.ignition_current,"a"
+ 2578              		.align	1
+ 2581              	ignition_current:
+ 2582 0000 0500     		.short	5
+ 2583              		.global	max_current
+ 2584              		.section	.rodata.max_current,"a"
+ 2587              	max_current:
+ 2588 0000 C8       		.byte	-56
+ 2589              		.global	ignition_timeout
+ 2590              		.section	.rodata.ignition_timeout,"a"
+ 2591              		.align	1
+ 2594              	ignition_timeout:
+ 2595 0000 F401     		.short	500
+ 2596              		.global	current_threshold
+ARM GAS  /tmp/ccd93dhD.s 			page 64
+
+
+ 2597              		.section	.rodata.current_threshold,"a"
+ 2598              		.align	1
+ 2601              	current_threshold:
+ 2602 0000 2C01     		.short	300
+ 2603              		.global	mode_string
+ 2604              		.section	.rodata.str1.4,"aMS",%progbits,1
+ 2605              		.align	2
+ 2606              	.LC6:
+ 2607 0000 444300   		.ascii	"DC\000"
+ 2608 0003 00       		.align	2
+ 2609              	.LC7:
+ 2610 0004 414300   		.ascii	"AC\000"
+ 2611 0007 00       		.align	2
+ 2612              	.LC8:
+ 2613 0008 50756C00 		.ascii	"Pul\000"
+ 2614              		.section	.data.mode_string,"aw"
+ 2615              		.align	2
+ 2618              	mode_string:
+ 2619 0000 00000000 		.word	.LC6
+ 2620 0004 04000000 		.word	.LC7
+ 2621 0008 08000000 		.word	.LC8
+ 2622              		.global	menu_string
+ 2623              		.section	.data.menu_string,"aw"
+ 2624              		.align	2
+ 2627              	menu_string:
+ 2628 0000 08000000 		.word	.LC1
+ 2629 0004 10000000 		.word	.LC2
+ 2630              		.global	postflow_time
+ 2631              		.section	.bss.postflow_time,"aw",%nobits
+ 2632              		.align	1
+ 2635              	postflow_time:
+ 2636 0000 0000     		.space	2
+ 2637              		.global	preflow_time
+ 2638              		.section	.bss.preflow_time,"aw",%nobits
+ 2639              		.align	1
+ 2642              	preflow_time:
+ 2643 0000 0000     		.space	2
+ 2644              		.global	downslope_time
+ 2645              		.section	.bss.downslope_time,"aw",%nobits
+ 2646              		.align	1
+ 2649              	downslope_time:
+ 2650 0000 0000     		.space	2
+ 2651              		.global	upslope_time
+ 2652              		.section	.bss.upslope_time,"aw",%nobits
+ 2653              		.align	1
+ 2656              	upslope_time:
+ 2657 0000 0000     		.space	2
+ 2658              		.global	pulse_duty
+ 2659              		.section	.bss.pulse_duty,"aw",%nobits
+ 2662              	pulse_duty:
+ 2663 0000 00       		.space	1
+ 2664              		.global	pulse_frequency
+ 2665              		.section	.bss.pulse_frequency,"aw",%nobits
+ 2666              		.align	2
+ 2669              	pulse_frequency:
+ 2670 0000 00000000 		.space	4
+ 2671              		.global	ac_duty
+ARM GAS  /tmp/ccd93dhD.s 			page 65
+
+
+ 2672              		.section	.bss.ac_duty,"aw",%nobits
+ 2675              	ac_duty:
+ 2676 0000 00       		.space	1
+ 2677              		.global	ac_frequency
+ 2678              		.section	.bss.ac_frequency,"aw",%nobits
+ 2681              	ac_frequency:
+ 2682 0000 00       		.space	1
+ 2683              		.global	start_current
+ 2684              		.section	.bss.start_current,"aw",%nobits
+ 2687              	start_current:
+ 2688 0000 00       		.space	1
+ 2689              		.global	crater_current
+ 2690              		.section	.bss.crater_current,"aw",%nobits
+ 2693              	crater_current:
+ 2694 0000 00       		.space	1
+ 2695              		.global	background_current
+ 2696              		.section	.bss.background_current,"aw",%nobits
+ 2699              	background_current:
+ 2700 0000 00       		.space	1
+ 2701              		.global	base_current
+ 2702              		.section	.bss.base_current,"aw",%nobits
+ 2705              	base_current:
+ 2706 0000 00       		.space	1
+ 2707              		.text
+ 2708              	.Letext0:
+ 2709              		.file 2 "/usr/arm-none-eabi/include/machine/_default_types.h"
+ 2710              		.file 3 "/usr/arm-none-eabi/include/sys/_stdint.h"
+ 2711              		.file 4 "Drivers/CMSIS/Device/ST/STM32F4xx/Include/stm32f401xc.h"
+ 2712              		.file 5 "Drivers/CMSIS/Device/ST/STM32F4xx/Include/stm32f4xx.h"
+ 2713              		.file 6 "Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_def.h"
+ 2714              		.file 7 "Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_gpio.h"
+ 2715              		.file 8 "Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_dma.h"
+ 2716              		.file 9 "Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_adc.h"
+ 2717              		.file 10 "Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_i2c.h"
+ 2718              		.file 11 "Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_tim.h"
+ 2719              		.file 12 "Core/Inc/main.h"
+ 2720              		.file 13 "Core/Inc/pcf8574.h"
+ 2721              		.file 14 "Core/Inc/ssd1306.h"
+ 2722              		.file 15 "Core/Inc/ssd1306_fonts.h"
+ 2723              		.file 16 "/usr/arm-none-eabi/include/stdio.h"
+ 2724              		.file 17 "Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal.h"
+ARM GAS  /tmp/ccd93dhD.s 			page 66
+
+
+DEFINED SYMBOLS
+                            *ABS*:00000000 welder.c
+     /tmp/ccd93dhD.s:21     .rodata.idle_menu.str1.4:00000000 $d
+     /tmp/ccd93dhD.s:40     .text.idle_menu:00000000 $t
+     /tmp/ccd93dhD.s:46     .text.idle_menu:00000000 idle_menu
+     /tmp/ccd93dhD.s:510    .text.idle_menu:00000228 $d
+     /tmp/ccd93dhD.s:2561   .bss.encoder_button:00000000 encoder_button
+     /tmp/ccd93dhD.s:2489   .bss.menu.12:00000000 menu.12
+     /tmp/ccd93dhD.s:2478   .bss.set.10:00000000 set.10
+     /tmp/ccd93dhD.s:2473   .bss.enc_last.9:00000000 enc_last.9
+     /tmp/ccd93dhD.s:2467   .data.i.8:00000000 i.8
+     /tmp/ccd93dhD.s:2484   .bss.last_millis.11:00000000 last_millis.11
+     /tmp/ccd93dhD.s:2642   .bss.preflow_time:00000000 preflow_time
+     /tmp/ccd93dhD.s:2656   .bss.upslope_time:00000000 upslope_time
+     /tmp/ccd93dhD.s:534    .text.idle_menu:00000270 $t
+     /tmp/ccd93dhD.s:808    .text.idle_menu:00000408 $d
+     /tmp/ccd93dhD.s:2521   .data.trigger_type:00000000 trigger_type
+     /tmp/ccd93dhD.s:2515   .bss.welding_mode:00000000 welding_mode
+     /tmp/ccd93dhD.s:2618   .data.mode_string:00000000 mode_string
+     /tmp/ccd93dhD.s:2549   .bss.adc_buffer:00000000 adc_buffer
+     /tmp/ccd93dhD.s:827    .text.set_current:00000000 $t
+     /tmp/ccd93dhD.s:833    .text.set_current:00000000 set_current
+     /tmp/ccd93dhD.s:906    .text.set_current:00000038 $d
+     /tmp/ccd93dhD.s:912    .text.weld:00000000 $t
+     /tmp/ccd93dhD.s:918    .text.weld:00000000 weld
+     /tmp/ccd93dhD.s:1092   .text.weld:000000f0 $d
+     /tmp/ccd93dhD.s:2705   .bss.base_current:00000000 base_current
+     /tmp/ccd93dhD.s:2461   .bss.set_curr.7:00000000 set_curr.7
+     /tmp/ccd93dhD.s:2555   .bss.pedal_connected:00000000 pedal_connected
+     /tmp/ccd93dhD.s:2669   .bss.pulse_frequency:00000000 pulse_frequency
+     /tmp/ccd93dhD.s:2455   .bss.prev_millis.6:00000000 prev_millis.6
+     /tmp/ccd93dhD.s:2662   .bss.pulse_duty:00000000 pulse_duty
+     /tmp/ccd93dhD.s:2699   .bss.background_current:00000000 background_current
+     /tmp/ccd93dhD.s:1110   .text.set_pwm_frequency:00000000 $t
+     /tmp/ccd93dhD.s:1116   .text.set_pwm_frequency:00000000 set_pwm_frequency
+     /tmp/ccd93dhD.s:1145   .text.set_pwm_frequency:00000014 $d
+     /tmp/ccd93dhD.s:1151   .text.set_pwm_duty:00000000 $t
+     /tmp/ccd93dhD.s:1157   .text.set_pwm_duty:00000000 set_pwm_duty
+     /tmp/ccd93dhD.s:1191   .text.set_pwm_duty:00000018 $d
+     /tmp/ccd93dhD.s:1197   .text.HAL_GPIO_EXTI_Callback:00000000 $t
+     /tmp/ccd93dhD.s:1203   .text.HAL_GPIO_EXTI_Callback:00000000 HAL_GPIO_EXTI_Callback
+     /tmp/ccd93dhD.s:1217   .text.LinearTransition:00000000 $t
+     /tmp/ccd93dhD.s:1223   .text.LinearTransition:00000000 LinearTransition
+     /tmp/ccd93dhD.s:1343   .text.LinearTransition:00000074 $d
+     /tmp/ccd93dhD.s:2449   .bss.started.5:00000000 started.5
+     /tmp/ccd93dhD.s:2444   .bss.startTime.4:00000000 startTime.4
+     /tmp/ccd93dhD.s:1349   .text.HAL_TIM_PeriodElapsedCallback:00000000 $t
+     /tmp/ccd93dhD.s:1355   .text.HAL_TIM_PeriodElapsedCallback:00000000 HAL_TIM_PeriodElapsedCallback
+     /tmp/ccd93dhD.s:1470   .text.HAL_TIM_PeriodElapsedCallback:00000070 $d
+     /tmp/ccd93dhD.s:2438   .bss.ttrig.3:00000000 ttrig.3
+     /tmp/ccd93dhD.s:2567   .bss.torch_trigger:00000000 torch_trigger
+     /tmp/ccd93dhD.s:2433   .bss.etrig.2:00000000 etrig.2
+     /tmp/ccd93dhD.s:1480   .text.NB_Delay:00000000 $t
+     /tmp/ccd93dhD.s:1486   .text.NB_Delay:00000000 NB_Delay
+     /tmp/ccd93dhD.s:1573   .text.NB_Delay:00000044 $d
+     /tmp/ccd93dhD.s:2428   .bss.started.1:00000000 started.1
+     /tmp/ccd93dhD.s:2423   .bss.startTime.0:00000000 startTime.0
+ARM GAS  /tmp/ccd93dhD.s 			page 67
+
+
+     /tmp/ccd93dhD.s:1579   .text.stop_condition:00000000 $t
+     /tmp/ccd93dhD.s:1585   .text.stop_condition:00000000 stop_condition
+     /tmp/ccd93dhD.s:1668   .text.stop_condition:00000054 $d
+     /tmp/ccd93dhD.s:1677   .text.start_condition:00000000 $t
+     /tmp/ccd93dhD.s:1683   .text.start_condition:00000000 start_condition
+     /tmp/ccd93dhD.s:1767   .text.start_condition:00000058 $d
+     /tmp/ccd93dhD.s:1776   .text.state_machine:00000000 $t
+     /tmp/ccd93dhD.s:1782   .text.state_machine:00000000 state_machine
+     /tmp/ccd93dhD.s:1805   .text.state_machine:00000014 $d
+     /tmp/ccd93dhD.s:1813   .text.state_machine:00000024 $t
+     /tmp/ccd93dhD.s:2203   .text.state_machine:0000021c $d
+     /tmp/ccd93dhD.s:2509   .bss.state:00000000 state
+     /tmp/ccd93dhD.s:2681   .bss.ac_frequency:00000000 ac_frequency
+     /tmp/ccd93dhD.s:2675   .bss.ac_duty:00000000 ac_duty
+     /tmp/ccd93dhD.s:2687   .bss.start_current:00000000 start_current
+     /tmp/ccd93dhD.s:2693   .bss.crater_current:00000000 crater_current
+     /tmp/ccd93dhD.s:2649   .bss.downslope_time:00000000 downslope_time
+     /tmp/ccd93dhD.s:2635   .bss.postflow_time:00000000 postflow_time
+     /tmp/ccd93dhD.s:2220   .text.welder:00000000 $t
+     /tmp/ccd93dhD.s:2226   .text.welder:00000000 welder
+     /tmp/ccd93dhD.s:2392   .text.welder:000000e4 $d
+     /tmp/ccd93dhD.s:2496   .bss.pcf8574_2:00000000 pcf8574_2
+     /tmp/ccd93dhD.s:2503   .bss.pcf8574_1:00000000 pcf8574_1
+     /tmp/ccd93dhD.s:2420   .bss.startTime.0:00000000 $d
+     /tmp/ccd93dhD.s:2429   .bss.started.1:00000000 $d
+     /tmp/ccd93dhD.s:2434   .bss.etrig.2:00000000 $d
+     /tmp/ccd93dhD.s:2439   .bss.ttrig.3:00000000 $d
+     /tmp/ccd93dhD.s:2441   .bss.startTime.4:00000000 $d
+     /tmp/ccd93dhD.s:2450   .bss.started.5:00000000 $d
+     /tmp/ccd93dhD.s:2452   .bss.prev_millis.6:00000000 $d
+     /tmp/ccd93dhD.s:2458   .bss.set_curr.7:00000000 $d
+     /tmp/ccd93dhD.s:2464   .data.i.8:00000000 $d
+     /tmp/ccd93dhD.s:2470   .bss.enc_last.9:00000000 $d
+     /tmp/ccd93dhD.s:2479   .bss.set.10:00000000 $d
+     /tmp/ccd93dhD.s:2481   .bss.last_millis.11:00000000 $d
+     /tmp/ccd93dhD.s:2490   .bss.menu.12:00000000 $d
+     /tmp/ccd93dhD.s:2493   .bss.pcf8574_2:00000000 $d
+     /tmp/ccd93dhD.s:2500   .bss.pcf8574_1:00000000 $d
+     /tmp/ccd93dhD.s:2510   .bss.state:00000000 $d
+     /tmp/ccd93dhD.s:2516   .bss.welding_mode:00000000 $d
+     /tmp/ccd93dhD.s:2528   .bss.deb_prev_millis:00000000 deb_prev_millis
+     /tmp/ccd93dhD.s:2525   .bss.deb_prev_millis:00000000 $d
+     /tmp/ccd93dhD.s:2535   .bss.deb_current_millis:00000000 deb_current_millis
+     /tmp/ccd93dhD.s:2532   .bss.deb_current_millis:00000000 $d
+     /tmp/ccd93dhD.s:2542   .bss.start_tick:00000000 start_tick
+     /tmp/ccd93dhD.s:2539   .bss.start_tick:00000000 $d
+     /tmp/ccd93dhD.s:2546   .bss.adc_buffer:00000000 $d
+     /tmp/ccd93dhD.s:2556   .bss.pedal_connected:00000000 $d
+     /tmp/ccd93dhD.s:2562   .bss.encoder_button:00000000 $d
+     /tmp/ccd93dhD.s:2568   .bss.torch_trigger:00000000 $d
+     /tmp/ccd93dhD.s:2574   .rodata.crater_time:00000000 crater_time
+     /tmp/ccd93dhD.s:2571   .rodata.crater_time:00000000 $d
+     /tmp/ccd93dhD.s:2581   .rodata.ignition_current:00000000 ignition_current
+     /tmp/ccd93dhD.s:2578   .rodata.ignition_current:00000000 $d
+     /tmp/ccd93dhD.s:2587   .rodata.max_current:00000000 max_current
+     /tmp/ccd93dhD.s:2594   .rodata.ignition_timeout:00000000 ignition_timeout
+     /tmp/ccd93dhD.s:2591   .rodata.ignition_timeout:00000000 $d
+ARM GAS  /tmp/ccd93dhD.s 			page 68
+
+
+     /tmp/ccd93dhD.s:2601   .rodata.current_threshold:00000000 current_threshold
+     /tmp/ccd93dhD.s:2598   .rodata.current_threshold:00000000 $d
+     /tmp/ccd93dhD.s:2605   .rodata.str1.4:00000000 $d
+     /tmp/ccd93dhD.s:2615   .data.mode_string:00000000 $d
+     /tmp/ccd93dhD.s:2627   .data.menu_string:00000000 menu_string
+     /tmp/ccd93dhD.s:2624   .data.menu_string:00000000 $d
+     /tmp/ccd93dhD.s:2632   .bss.postflow_time:00000000 $d
+     /tmp/ccd93dhD.s:2639   .bss.preflow_time:00000000 $d
+     /tmp/ccd93dhD.s:2646   .bss.downslope_time:00000000 $d
+     /tmp/ccd93dhD.s:2653   .bss.upslope_time:00000000 $d
+     /tmp/ccd93dhD.s:2663   .bss.pulse_duty:00000000 $d
+     /tmp/ccd93dhD.s:2666   .bss.pulse_frequency:00000000 $d
+     /tmp/ccd93dhD.s:2676   .bss.ac_duty:00000000 $d
+     /tmp/ccd93dhD.s:2682   .bss.ac_frequency:00000000 $d
+     /tmp/ccd93dhD.s:2688   .bss.start_current:00000000 $d
+     /tmp/ccd93dhD.s:2694   .bss.crater_current:00000000 $d
+     /tmp/ccd93dhD.s:2700   .bss.background_current:00000000 $d
+     /tmp/ccd93dhD.s:2706   .bss.base_current:00000000 $d
+
+UNDEFINED SYMBOLS
+ssd1306_Fill
+HAL_GetTick
+ssd1306_UpdateScreen
+snprintf
+ssd1306_SetCursor
+ssd1306_WriteString
+htim2
+Font_16x26
+Font_11x18
+HAL_TIM_PWM_Start_IT
+HAL_TIM_PWM_Stop_IT
+htim10
+__aeabi_f2d
+__aeabi_ddiv
+__aeabi_dmul
+__aeabi_d2uiz
+htim4
+HAL_GPIO_ReadPin
+HAL_GPIO_WritePin
+PCF8574_Init
+PCF8574_WritePort
+ssd1306_Init
+HAL_TIM_Encoder_Start
+HAL_ADC_Start_DMA
+HAL_TIM_PWM_Start
+HAL_TIM_Base_Start_IT
+hadc1
+htim11
+hi2c1

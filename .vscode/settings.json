@@ -1,0 +1,12 @@
+{
+    "cortex-debug.armToolchainPath": "/usr/bin",
+    "cortex-debug.openocdPath": "/usr/bin/openocd",
+    "stm32-for-vscode.openOCDPath": "/usr/bin/openocd",
+    "stm32-for-vscode.armToolchainPath": "/usr/bin",
+    "files.associations": {
+        "welder.h": "c",
+        "pcf8574.h": "c",
+        "ssd1306_fonts.h": "c",
+        "main.h": "c"
+    }
+}
