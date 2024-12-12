@@ -69,8 +69,6 @@ void Error_Handler(void);
 #define PEDAL_GPIO_Port GPIOA
 #define CURR_SENSE_Pin GPIO_PIN_1
 #define CURR_SENSE_GPIO_Port GPIOA
-#define SPI1_CS_Pin GPIO_PIN_4
-#define SPI1_CS_GPIO_Port GPIOA
 #define ENC0_Pin GPIO_PIN_15
 #define ENC0_GPIO_Port GPIOA
 #define ENC1_Pin GPIO_PIN_3
@@ -92,7 +90,7 @@ extern DMA_HandleTypeDef hdma_adc1;
  
 extern I2C_HandleTypeDef hi2c1;
 
-extern SPI_HandleTypeDef hspi1;
+// extern SPI_HandleTypeDef hspi1;
  
 extern TIM_HandleTypeDef htim2;
 extern TIM_HandleTypeDef htim4;

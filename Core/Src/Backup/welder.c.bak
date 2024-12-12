@@ -5,6 +5,7 @@
 #include "ssd1306_fonts.h"
 #include "stdio.h"
 #include "main.h"
+#include "led_control.h"
 
 // #define DEBUG
 

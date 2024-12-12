@@ -1,10 +1,11 @@
 
 #include "welder.h"
-#include "pcf8574.h"
+// #include "pcf8574.h"
 #include "ssd1306.h"
 #include "ssd1306_fonts.h"
 #include "stdio.h"
 #include "main.h"
+#include "led_control.h"
 
 // #define DEBUG
 
@@ -71,14 +72,13 @@ enum TriggerType trigger_type = _4T; // 2T as default cus why not
 enum WeldingMode welding_mode = 0;  // DC as default
 volatile enum State state = idle;
 
-PCF8574_HandleTypeDef pcf8574_1;
-PCF8574_HandleTypeDef pcf8574_2;
+// PCF8574_HandleTypeDef pcf8574_1;
+// PCF8574_HandleTypeDef pcf8574_2;
 
 
-// void welder(TIM_HandleTypeDef *enc_tim, TIM_HandleTypeDef *h_pwm_tim, TIM_HandleTypeDef *pwm_tim,
-            // I2C_HandleTypeDef *i2c, SPI_HandleTypeDef *spi, ADC_HandleTypeDef *adc)
 void welder()
 {
+    // Some default settings
     preflow_time = 1200;
     postflow_time = 2000;
     upslope_time = 3000;
@@ -98,14 +98,23 @@ void welder()
     ac_frequency = 100;
     ac_duty = 70;
 
-    // Init
+    // Init peripethials
     HAL_GPIO_WritePin(GAS_GPIO_Port,GAS_Pin, GPIO_PIN_SET);
-    // Initialize the PCF8574 with the desired address (A0 = 0, A1 = 0, A2 = 0)
-    PCF8574_Init(&pcf8574_1, &hi2c1, 0, 0, 0);
-    PCF8574_Init(&pcf8574_2, &hi2c1, 0, 0, 1);
+    leds_off();
+    
+    if(1){
+        for(uint16_t i = 0; i<4096; i++){
+            write_led(i);
+            HAL_Delay(500);
+        }
+    }
 
-    PCF8574_WritePort(&pcf8574_1, 0x00);
-    PCF8574_WritePort(&pcf8574_2, 0x00);
+    // Initialize the PCF8574 with the desired address (A0 = 0, A1 = 0, A2 = 0)
+    // PCF8574_Init(&pcf8574_1, &hi2c1, 0, 0, 0);
+    // PCF8574_Init(&pcf8574_2, &hi2c1, 0, 0, 1);
+
+    // PCF8574_WritePort(&pcf8574_1, 0x00);
+    // PCF8574_WritePort(&pcf8574_2, 0x00);
 
     ssd1306_Init();
     ssd1306_Fill(0);
@@ -114,7 +123,6 @@ void welder()
     HAL_TIM_Encoder_Start(&htim2, TIM_CHANNEL_ALL); // Encoder timer
 
     HAL_ADC_Start_DMA(&hadc1, adc_buffer, 2);
-
 
     set_pwm_frequency(ac_frequency);
     HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_4);

@@ -69,6 +69,16 @@ void Error_Handler(void);
 #define PEDAL_GPIO_Port GPIOA
 #define CURR_SENSE_Pin GPIO_PIN_1
 #define CURR_SENSE_GPIO_Port GPIOA
+#define LED_COL_0_Pin GPIO_PIN_12
+#define LED_COL_0_GPIO_Port GPIOB
+#define LED_COL_1_Pin GPIO_PIN_13
+#define LED_COL_1_GPIO_Port GPIOB
+#define LED_COL_2_Pin GPIO_PIN_14
+#define LED_COL_2_GPIO_Port GPIOB
+#define LED_ROW_0_Pin GPIO_PIN_15
+#define LED_ROW_0_GPIO_Port GPIOB
+#define LED_ROW_1_Pin GPIO_PIN_8
+#define LED_ROW_1_GPIO_Port GPIOA
 #define ENC0_Pin GPIO_PIN_15
 #define ENC0_GPIO_Port GPIOA
 #define ENC1_Pin GPIO_PIN_3

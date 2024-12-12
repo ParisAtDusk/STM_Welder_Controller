@@ -36,6 +36,7 @@ BUILD_DIR = build
 ######################################
 # C sources
 C_SOURCES =  \
+Core/Src/led_control.c \
 Core/Src/main.c \
 Core/Src/pcf8574.c \
 Core/Src/ssd1306.c \
