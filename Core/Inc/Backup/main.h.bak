@@ -69,6 +69,8 @@ void Error_Handler(void);
 #define PEDAL_GPIO_Port GPIOA
 #define CURR_SENSE_Pin GPIO_PIN_1
 #define CURR_SENSE_GPIO_Port GPIOA
+#define SPI1_CS_Pin GPIO_PIN_4
+#define SPI1_CS_GPIO_Port GPIOA
 #define LED_COL_0_Pin GPIO_PIN_12
 #define LED_COL_0_GPIO_Port GPIOB
 #define LED_COL_1_Pin GPIO_PIN_13
@@ -79,13 +81,14 @@ void Error_Handler(void);
 #define LED_ROW_0_GPIO_Port GPIOB
 #define LED_ROW_1_Pin GPIO_PIN_8
 #define LED_ROW_1_GPIO_Port GPIOA
+#define SHUTDOWN_Pin GPIO_PIN_12
+#define SHUTDOWN_GPIO_Port GPIOA
 #define ENC0_Pin GPIO_PIN_15
 #define ENC0_GPIO_Port GPIOA
 #define ENC1_Pin GPIO_PIN_3
 #define ENC1_GPIO_Port GPIOB
 #define ENC_BUTTON_Pin GPIO_PIN_4
 #define ENC_BUTTON_GPIO_Port GPIOB
-#define ENC_BUTTON_EXTI_IRQn EXTI4_IRQn
 #define TORCH_BUTTON_Pin GPIO_PIN_5
 #define TORCH_BUTTON_GPIO_Port GPIOB
 #define TORCH_BUTTON_EXTI_IRQn EXTI9_5_IRQn
